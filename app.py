@@ -578,12 +578,11 @@ tab_buscar, tab_sugeridos = st.tabs(["🔎 Buscador", "📦 Sugeridos de traslad
 with tab_buscar:
     st.markdown("#### Buscador de artículos")
     busqueda = st.text_input(
-        "Buscar por Clave o Descripción (deja vacío para ver una muestra):",
+        "Buscar por Clave o Descripción (deja vacío para ver todo):",
         value="",
     )
 
-    df_buscar = data
-
+    df_buscar = data.copy()
     if busqueda.strip():
         txt = busqueda.strip().lower()
         mask = (
@@ -591,31 +590,62 @@ with tab_buscar:
             | df_buscar["Descripcion"].astype(str).str.lower().str.contains(txt)
         )
         df_buscar = df_buscar[mask]
-    else:
-        # 👇 MUESTRA SÓLO UNA MUESTRA CUANDO NO HAY BÚSQUEDA
-        df_buscar = df_buscar.head(500)
 
+    # --------- CAMBIO: agrupar nombres similares en la primera tabla ---------
+    # Clave / Descripción primero, luego cada almacén pegado a su .1
     cols_show = ["Clave", "Descripcion"]
     for inv in inv_cols:
         cols_show.append(inv)
         cls = class_cols[inv]
         if cls is not None:
             cols_show.append(cls)
-
+    # -------------------------------------------------------------------------
     df_buscar = df_buscar[cols_show].copy()
 
     for col in inv_cols:
-        df_buscar[col] = pd.to_numeric(df_buscar[col], errors="coerce").fillna(0).astype(int)
+        df_buscar[col] = pd.to_numeric(df_buscar[col], errors="coerce").fillna(0).astype(
+            int
+        )
 
-    if len(df_buscar) <= 1500:
     styler_buscar = style_class_colors(
         df_buscar, pairs_for_buscar=[(c, class_cols[c]) for c in inv_cols]
     )
     styler_buscar = styler_buscar.format(format_int, subset=inv_cols)
+
     st.dataframe(styler_buscar, use_container_width=True, height=480)
-else:
-    # Sin estilos, pero mucho más rápido
-    df_buscar_display = df_buscar.copy()
-    df_buscar_display[inv_cols] = df_buscar_display[inv_cols].applymap(format_int)
-    st.info("Tabla muy grande: se muestra sin colores para ser más rápida.")
-    st.dataframe(df_buscar_display, use_container_width=True, height=480)
+
+with tab_sugeridos:
+    st.markdown("#### Sugeridos de traslado")
+
+    if origen_sel == "Todos":
+        st.info("Selecciona un **almacén específico** como origen para ver sugerencias.")
+    elif not destinos_sel:
+        st.info("Selecciona al menos **un almacén destino** para calcular sugerencias.")
+    else:
+        origin_inv_col = origen_sel
+        df_sug = build_suggestions(
+            data,
+            inv_cols,
+            class_cols,
+            origin_inv_col=origin_inv_col,
+            dest_inv_cols=destinos_sel,
+            umbral_bajos_ab=umbral_bajos_ab,
+        )
+
+        if df_sug.empty:
+            st.warning("No se encontraron sugerencias de traslado con los criterios actuales.")
+        else:
+            st.markdown(
+                f"Se muestran hasta **{len(df_sug)} artículos** (ordenados por mayor sugerencia)."
+            )
+            styler_sug = style_class_colors(df_sug)
+            styler_sug = styler_sug.format(
+                format_int,
+                subset=[
+                    "Existencia origen",
+                    "Existencia destino",
+                    "Faltante destino",
+                    "Sugerido trasladar",
+                ],
+            )
+            st.dataframe(styler_sug, use_container_width=True, height=520)
