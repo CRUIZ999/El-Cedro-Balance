@@ -198,16 +198,26 @@ def build_suggestions(
     origin_class_col = class_cols[origin_inv_col]
     registros = []
 
-    for _, row in data.iterrows():
+    # Filtrar primero sólo lo relevante para el origen (mejora rendimiento)
+    data_filtrada = data.copy()
+    data_filtrada["__exist_o__"] = pd.to_numeric(
+        data_filtrada[origin_inv_col], errors="coerce"
+    ).fillna(0).astype(int)
+    data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
+
+    data_filtrada = data_filtrada[
+        (data_filtrada["__clas_o__"].isin(["A", "B"])) &
+        (data_filtrada["__exist_o__"] > 0) &
+        (data_filtrada["__exist_o__"] < umbral_bajos_ab)
+    ]
+
+    for _, row in data_filtrada.iterrows():
         cod = row["Codigo"]
         clave = row["Clave"]
         desc = row["Descripcion"]
 
-        exist_o = int(row[origin_inv_col])
-        clas_o = str(row[origin_class_col]).strip()
-
-        if clas_o not in ["A", "B"]:
-            continue
+        exist_o = int(row["__exist_o__"])
+        clas_o = row["__clas_o__"]
 
         faltante = max(0, umbral_bajos_ab - exist_o)
         if faltante <= 0:
@@ -578,41 +588,55 @@ tab_buscar, tab_sugeridos = st.tabs(["🔎 Buscador", "📦 Sugeridos de traslad
 with tab_buscar:
     st.markdown("#### Buscador de artículos")
     busqueda = st.text_input(
-        "Buscar por Clave o Descripción (deja vacío para ver todo):",
+        "Buscar por Código, Clave o Descripción (deja vacío para ver una muestra):",
         value="",
     )
 
-    df_buscar = data.copy()
+    df_buscar = data
+
     if busqueda.strip():
         txt = busqueda.strip().lower()
         mask = (
             df_buscar["Clave"].astype(str).str.lower().str.contains(txt)
             | df_buscar["Descripcion"].astype(str).str.lower().str.contains(txt)
+            | df_buscar["Codigo"].astype(str).str.lower().str.contains(txt)
         )
         df_buscar = df_buscar[mask]
+    else:
+        # Muestra limitada cuando no hay filtro para ir más rápido
+        df_buscar = df_buscar.head(500)
 
-    # --------- CAMBIO: agrupar nombres similares en la primera tabla ---------
     # Clave / Descripción primero, luego cada almacén pegado a su .1
-    cols_show = ["Clave", "Descripcion"]
+    cols_show = ["Codigo", "Clave", "Descripcion"]
     for inv in inv_cols:
         cols_show.append(inv)
         cls = class_cols[inv]
         if cls is not None:
             cols_show.append(cls)
-    # -------------------------------------------------------------------------
+
     df_buscar = df_buscar[cols_show].copy()
 
     for col in inv_cols:
-        df_buscar[col] = pd.to_numeric(df_buscar[col], errors="coerce").fillna(0).astype(
-            int
+        df_buscar[col] = pd.to_numeric(
+            df_buscar[col], errors="coerce"
+        ).fillna(0).astype(int)
+
+    # Si la tabla es relativamente chica, aplicamos colores (Styler)
+    if len(df_buscar) <= 1500:
+        styler_buscar = style_class_colors(
+            df_buscar, pairs_for_buscar=[(c, class_cols[c]) for c in inv_cols]
         )
+        styler_buscar = styler_buscar.format(format_int, subset=inv_cols)
+        st.dataframe(styler_buscar, use_container_width=True, height=480, hide_index=True)
+    else:
+        # Tabla muy grande: sin estilos, pero más rápida
+        df_buscar_display = df_buscar.copy()
+        # Formateamos valores de inventario como texto con separador de miles
+        for col in inv_cols:
+            df_buscar_display[col] = df_buscar_display[col].apply(format_int)
 
-    styler_buscar = style_class_colors(
-        df_buscar, pairs_for_buscar=[(c, class_cols[c]) for c in inv_cols]
-    )
-    styler_buscar = styler_buscar.format(format_int, subset=inv_cols)
-
-    st.dataframe(styler_buscar, use_container_width=True, height=480)
+        st.info("Tabla muy grande: se muestra sin colores para optimizar el rendimiento.")
+        st.dataframe(df_buscar_display, use_container_width=True, height=480, hide_index=True)
 
 with tab_sugeridos:
     st.markdown("#### Sugeridos de traslado")
@@ -648,4 +672,4 @@ with tab_sugeridos:
                     "Sugerido trasladar",
                 ],
             )
-            st.dataframe(styler_sug, use_container_width=True, height=520)
+            st.dataframe(styler_sug, use_container_width=True, height=520, hide_index=True)
