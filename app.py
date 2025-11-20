@@ -81,8 +81,8 @@ def format_pct_from_fraction(frac: float) -> str:
 def load_balance(path: str = "Balance.csv"):
     """
     Carga Balance.csv.
-    Encabezados:
-    Codigo, Clave, Descripcion, Adelitas, Adelitas.1, San Agustin, San Agustin.1, ...
+    Encabezados esperados (ejemplo):
+    Codigo, Clave, Descripcion, Matriz, Matriz.1, Adelitas, Adelitas.1, ...
     Inventarios  = columnas que no son base y NO terminan en '.1'
     Clasificación = <InvCol> + '.1'
     """
@@ -129,41 +129,42 @@ def get_origin_df(data, inv_col, class_col):
 def compute_kpis(df_origin, umbral_bajos_ab: int):
     """
     Calcula:
-    - skus_totales
-    - skus_activos
-    - bajos_ab (A/B con existencia = 0)
-    - conteo por clasificacion A/B/C
-      * A y B: todos los SKU A/B (independiente de existencia)
-      * C: SOLO C con existencia > 0  ✅
-    - conteo de Sin Mov con existencia > 0
+    - skus_totales  -> todos los SKU distintos en el archivo
+    - skus_activos  -> A + B + C (todos) + Sin mov (>0)
+    - bajos_ab      -> A/B con existencia = 0
+    - conteo A/B/C  -> TODOS los SKU de esa clasificación, sin importar existencia
+    - SinMov        -> Sin mov con existencia > 0
     """
     df = df_origin.copy()
     df["Existencia"] = pd.to_numeric(df["Existencia"], errors="coerce").fillna(0).astype(int)
     df["Clasificacion"] = df["Clasificacion"].fillna("").astype(str).str.strip()
 
+    # Total de SKU en el archivo (cualquier clasificación)
     skus_totales = df["Clave"].nunique()
 
-    mask_abc = df["Clasificacion"].isin(["A", "B", "C"])
-    mask_sinmov = df["Clasificacion"].str.lower().str.contains("sin")
-    mask_sinmov_con_exist = mask_sinmov & (df["Existencia"] > 0)
+    # Máscaras por clasificación
+    mask_A = df["Clasificacion"] == "A"
+    mask_B = df["Clasificacion"] == "B"
+    mask_C = df["Clasificacion"] == "C"
+    mask_sin = df["Clasificacion"].str.lower().str.contains("sin")
 
-    skus_activos = df[mask_abc | mask_sinmov_con_exist]["Clave"].nunique()
+    # A, B, C -> TODOS los SKU de esa clasificación (sin importar existencia)
+    conteo_A = df[mask_A]["Clave"].nunique()
+    conteo_B = df[mask_B]["Clave"].nunique()
+    conteo_C = df[mask_C]["Clave"].nunique()
 
-    # Bajos A/B = existencia 0
-    mask_ab = df["Clasificacion"].isin(["A", "B"])
+    # Sin movimiento -> SOLO existencia > 0
+    mask_sin_pos = mask_sin & (df["Existencia"] > 0)
+    conteo_sinmov = df[mask_sin_pos]["Clave"].nunique()
+
+    # SKU activos = A + B + C (todos) + Sin mov (>0)
+    skus_activos = conteo_A + conteo_B + conteo_C + conteo_sinmov
+
+    # Bajos A/B = existencia = 0
+    mask_ab = mask_A | mask_B
     bajos_ab = df[mask_ab & (df["Existencia"] == 0)]["Clave"].nunique()
 
-    # A y B: todos los SKU A/B
-    conteo_A = df[df["Clasificacion"] == "A"]["Clave"].nunique()
-    conteo_B = df[df["Clasificacion"] == "B"]["Clave"].nunique()
-
-    # ✅ C: SOLO C con existencia > 0
-    mask_c = df["Clasificacion"] == "C"
-    conteo_C = df[mask_c & (df["Existencia"] > 0)]["Clave"].nunique()
-
-    # Sin mov con existencia > 0
-    conteo_sinmov = df[mask_sinmov_con_exist]["Clave"].nunique()
-
+    # Porcentajes sobre SKU activos
     def pct(v):
         if skus_activos == 0:
             return 0.0
@@ -198,13 +199,9 @@ def build_suggestions(
     umbral_bajos_ab: int,
 ):
     """
-    Genera sugerencias de traslado desde varios almacenes destino
-    hacia un único almacén origen.
-
-    Lógica:
-    - Origen: clasificación A/B con existencia = 0.
-    - Destino: clasificación C o Sin movimiento, con existencia > 0.
-    - Sin columnas de faltante / sugerido.
+    Sugeridos normales (reposiciones hacia el origen):
+    - Origen: A/B con existencia = 0.
+    - Destino: C o Sin mov con existencia > 0.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -270,13 +267,12 @@ def build_reverse_suggestions(
     class_cols,
     origin_inv_col: str,
     dest_inv_cols: list,
-    umbral_bajos_ab: int,  # no se usa
+    umbral_bajos_ab: int,
 ):
     """
-    Análisis inverso SIN UMBRAL:
-    - Origen: C o Sin Mov con existencia > 0.
-    - Destino: A o B (no importa cuánta existencia tengan).
-    - Sin columna de 'Sugerido trasladar'.
+    Sugeridos inversos:
+    - Origen: C o Sin mov con existencia > 0.
+    - Destino: A/B (cualquier existencia).
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -342,7 +338,6 @@ def get_base_c_sinmov(
     Devuelve TODOS los SKU del almacén origen que están en:
     - Clasificación C o Sin movimiento
     - Existencia > 0
-    (independiente de si tienen destino sugerido o no)
     """
     origin_class_col = class_cols[origin_inv_col]
     df = data.copy()
@@ -469,39 +464,194 @@ except Exception as e:
 st.title("🏭 Configuración de almacenes")
 
 # ---------------------------------------------------------------------
-# CONTROLES
+# BOTÓN DE AYUDA
 # ---------------------------------------------------------------------
-col_f1, col_f2 = st.columns([1.5, 2.0])
+with st.expander("❓ AYUDA – ¿Cómo usar esta herramienta?", expanded=False):
+    st.markdown("""
+### 🧠 ¿Qué hace esta herramienta?
 
-# Origen (con 'Todos')
-origin_options = ["Todos"] + warehouses
-default_origin = "Matriz" if "Matriz" in warehouses else origin_options[1]
-origin_index = origin_options.index(default_origin)
+Esta página lee un archivo llamado **Balance.csv** (que debe estar en la misma carpeta que la app).  
+Ese archivo tiene, para cada producto:
+
+- **Codigo**
+- **Clave**
+- **Descripcion**
+- Existencia en cada almacén (Matriz, Adelitas, etc.)
+- Clasificación de cada almacén (**A, B, C o Sin movimiento**)
+
+Con esa información, la herramienta te ayuda a:
+
+- Ver cuántos productos hay por tipo (**A, B, C, Sin movimiento**).
+- Detectar productos **importantes (A/B) que están en 0**.
+- Buscar productos por código, clave o descripción.
+- Ver **dónde sobran productos lentos (C / Sin movimiento)**.
+- Ver **dónde faltan productos importantes (A/B)**.
+- Generar listas de productos que se podrían **mover entre almacenes**.
+
+---
+
+### 1️⃣ Controles de arriba (Filtros principales)
+
+#### 🏬 Almacén que estoy revisando (origen)
+
+Aquí eliges la sucursal que quieres analizar, por ejemplo:
+
+- Matriz  
+- Adelitas  
+- Berriozabal  
+- etc.
+
+Esto le dice a la app:
+
+> “Quiero revisar cómo está el inventario de **este almacén**.”
+
+Cuando eliges **Todos**, los números de los KPI se calculan con **todos los almacenes juntos**, pero las sugerencias de traslado detalladas solo funcionan cuando escoges **un almacén específico**.
+
+#### 🧭 Almacenes de donde puedo solicitar / enviar
+
+Este es un cuadro con varios almacenes donde puedes marcar uno o varios.
+
+Significa:
+
+> “De **estos almacenes** sí puedo mandar o recibir mercancía.”
+
+Se usa en:
+
+- **Sugeridos de traslado** → el almacén origen recibe producto desde estos almacenes.
+- **Sugeridos inversos** → el almacén origen manda producto a estos almacenes.
+
+---
+
+### 2️⃣ Tarjetas amarillas (KPI de inventario)
+
+Debajo de los filtros verás 7 tarjetas amarillas. Cada una resume algo importante del inventario.
+
+1. **SKU en archivo / SKU en origen**  
+   - Cuenta cuántos productos diferentes (**Clave**) existen.
+   - Si origen = Todos → cuenta del archivo completo.
+   - Si origen = una sucursal → cuenta solo en ese almacén.
+
+2. **SKU´s activos**  
+   Es la suma de:
+   - Todos los productos **A**
+   - + todos los productos **B**
+   - + todos los productos **C**
+   - + todos los productos **Sin movimiento con existencia > 0**
+
+3. **SKU (A/B con existencia 0)**  
+   - Cuenta cuántos productos con clasificación **A o B**  
+   - Tienen existencia **= 0** en el almacén origen.
+
+4. **Clasificación SKU A**  
+   - Cuenta **todos los productos que son A**, sin importar la existencia.
+   - El porcentaje que se ve abajo es:  
+     `SKU A / SKU activos`.
+
+5. **Clasificación SKU B**  
+   - Cuenta **todos los productos que son B**, sin importar la existencia.
+   - El porcentaje es:  
+     `SKU B / SKU activos`.
+
+6. **Clasificación SKU C**  
+   - Cuenta **todos los productos que son C**, sin importar la existencia.
+   - El porcentaje es:  
+     `SKU C / SKU activos`.
+
+7. **Sin movimiento**  
+   - Cuenta los productos cuya clasificación dice “Sin movimiento” (o similar)  
+   - Y tienen **existencia > 0**.
+   - El porcentaje es:  
+     `SKU Sin movimiento (con existencia > 0) / SKU activos`.
+
+---
+
+### 3️⃣ Pestaña “🔎 Buscador”
+
+Sirve para **buscar productos individuales** y ver cómo están en cada almacén.
+
+- Escribe parte del **Código**, **Clave** o **Descripción**.
+- La tabla mostrará solo los productos que coincidan.
+- Si la caja está vacía, se muestra una muestra de hasta **500 productos**.
+
+Colores por almacén:
+
+- 🟢 Verde → A o B y existencia **> 0**
+- 🔵 Azul → A o B y existencia **= 0**
+- 🟠 Naranja → C y existencia **> 0**
+- 🔴 Rojo → Sin movimiento y existencia **> 0**
+
+---
+
+### 4️⃣ Pestaña “📦 Sugeridos de traslado”
+
+Responde:
+
+> “¿Qué productos importantes (A/B) están en **cero** en este almacén, y existen como C o Sin mov en otras sucursales?”
+
+Reglas:
+
+- Origen: A o B, existencia = 0.
+- Destino: C o Sin movimiento, existencia > 0.
+
+La tabla muestra:
+
+- Código, Clave, Descripción
+- Almacén origen, existencia y clasificación
+- Almacén destino, existencia y clasificación
+
+Puedes descargar todos los sugeridos en un archivo CSV.
+
+---
+
+### 5️⃣ Pestaña “♻️ Sugeridos inversos”
+
+Responde:
+
+> “¿Qué productos lentos (C o Sin movimiento) podrían salir de este almacén hacia sucursales donde son A o B?”
+
+Primero se arma una lista con todos los productos:
+
+- Clasificación C o Sin movimiento
+- Existencia > 0 en el almacén origen
+
+Esa lista se puede descargar completa (CSV).  
+Luego se arma una tabla solo con los que tienen sucursales destino A/B.
+
+---
+
+### 6️⃣ Existencias negativas
+
+Si algún producto tiene existencia **negativa**:
+
+- Aparece en el buscador.
+- No participa en reglas que piden existencia > 0.
+- Es una señal de que hay algo que revisar en el sistema o en inventarios físicos.
+    """)
+
+# ---------------------------------------------------------------------
+# CONTROLES (ORIGEN + DESTINOS EN LA MISMA FILA)
+# ---------------------------------------------------------------------
+umbral_bajos_ab = 0  # dummy para firma de funciones
+
+col_f1, col_f2 = st.columns([1.3, 2.0])
 
 with col_f1:
+    origin_options = ["Todos"] + warehouses
+    default_origin = "Matriz" if "Matriz" in warehouses else origin_options[1]
+    origin_index = origin_options.index(default_origin)
+
     origen_sel = st.selectbox(
         "Almacén que estoy revisando (origen)",
         origin_options,
         index=origin_index,
     )
 
-# Umbral ya no se usa; solo explicamos la lógica del KPI
 with col_f2:
-    st.markdown(
-        "**KPI A/B (SKU con existencia 0):**\n\n"
-        "- Cuenta SKU con clasificación **A** o **B**\n"
-        "- Y **existencia = 0** en el almacén origen.\n\n"
-        "**KPI C:** solo SKU C con existencia > 0."
-    )
+    if origen_sel == "Todos":
+        opciones_destino = warehouses
+    else:
+        opciones_destino = [w for w in warehouses if w != origen_sel]
 
-# Valor dummy para mantener firmas de funciones
-umbral_bajos_ab = 0
-
-# Destinos (solo si no es 'Todos')
-if origen_sel == "Todos":
-    destinos_sel = warehouses[:]  # solo para que no esté vacío
-else:
-    opciones_destino = [w for w in warehouses if w != origen_sel]
     destinos_sel = st.multiselect(
         "Almacenes de donde puedo solicitar / enviar",
         opciones_destino,
@@ -587,6 +737,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# KPIs
 m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
 
 with m1:
@@ -615,7 +766,7 @@ with m3:
     st.markdown(
         f"""
         <div class="metric-card">
-            <div class="metric-label">SKU (A/B en 0)</div>
+            <div class="metric-label">SKU (A/B con existencia 0)</div>
             <div class="metric-value">{format_int(kpis_to_show['bajos_ab'])}</div>
         </div>
         """,
@@ -626,7 +777,7 @@ with m4:
     st.markdown(
         f"""
         <div class="metric-card">
-            <div class="metric-label">Clasificación de SKU A</div>
+            <div class="metric-label">Clasificación SKU A</div>
             <div class="metric-value">{format_int(kpis_to_show['A'])}</div>
             <div class="metric-sub">{format_pct_from_fraction(kpis_to_show['pct_A'])} de SKU activos</div>
         </div>
@@ -673,7 +824,7 @@ with m7:
 st.markdown("")
 
 # ---------------------------------------------------------------------
-# TABS: BUSCADOR Y SUGERIDOS
+# TABS
 # ---------------------------------------------------------------------
 tab_buscar, tab_sugeridos, tab_inversos = st.tabs(
     ["🔎 Buscador", "📦 Sugeridos de traslado", "♻️ Sugeridos inversos"]
@@ -697,10 +848,8 @@ with tab_buscar:
         )
         df_buscar = df_buscar[mask]
     else:
-        # Muestra limitada cuando no hay filtro para ir más rápido
         df_buscar = df_buscar.head(500)
 
-    # Clave / Descripción primero, luego cada almacén pegado a su .1
     cols_show = ["Codigo", "Clave", "Descripcion"]
     for inv in inv_cols:
         cols_show.append(inv)
@@ -715,7 +864,6 @@ with tab_buscar:
             df_buscar[col], errors="coerce"
         ).fillna(0).astype(int)
 
-    # Si la tabla es relativamente chica, aplicamos colores (Styler)
     if len(df_buscar) <= 1500:
         styler_buscar = style_class_colors(
             df_buscar, pairs_for_buscar=[(c, class_cols[c]) for c in inv_cols]
@@ -723,7 +871,6 @@ with tab_buscar:
         styler_buscar = styler_buscar.format(format_int, subset=inv_cols)
         st.dataframe(styler_buscar, use_container_width=True, height=480, hide_index=True)
     else:
-        # Tabla muy grande: sin estilos, pero más rápida
         df_buscar_display = df_buscar.copy()
         for col in inv_cols:
             df_buscar_display[col] = df_buscar_display[col].apply(format_int)
@@ -766,7 +913,6 @@ with tab_sugeridos:
                 )
                 df_view = df_sug
 
-            # Botón de descarga con TODAS las filas
             csv_sug = df_sug.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Descargar sugeridos (CSV)",
@@ -795,14 +941,12 @@ with tab_inversos:
     else:
         origin_inv_col = origen_sel
 
-        # 1) TODOS los C / Sin mov con existencia > 0 en el origen
         df_base_cs = get_base_c_sinmov(
             data,
             origin_inv_col=origin_inv_col,
             class_cols=class_cols,
         )
 
-        # 2) Solo los que además tienen destinos A/B (sugerencias inversas)
         df_inv = build_reverse_suggestions(
             data,
             inv_cols,
@@ -817,19 +961,7 @@ with tab_inversos:
                 f"No hay SKU en clasificación C o Sin movimiento con existencia > 0 en **{origin_inv_col}**."
             )
         else:
-            total_base = len(df_base_cs)
-            total_sug = len(df_inv)
-
-            st.markdown(
-                f"En **{origin_inv_col}** hay **{total_base} SKU** en clasificación "
-                f"**C o Sin movimiento** con existencia &gt; 0."
-            )
-            st.markdown(
-                f"De ellos, **{total_sug} SKU** tienen sucursales A/B como destinos posibles "
-                f"y aparecen en la tabla de sugeridos inversos."
-            )
-
-            # CSV con TODOS los C / Sin mov > 0 del origen (cuadra con KPI de C+SinMov)
+            # CSV con TODOS los C / Sin mov > 0 del origen
             csv_inv = df_base_cs.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Descargar TODOS los SKU C / Sin mov del origen (CSV)",
@@ -847,15 +979,8 @@ with tab_inversos:
                 total_rows = len(df_inv)
                 view_limit = 500
                 if total_rows > view_limit:
-                    st.markdown(
-                        f"Se encontraron **{total_rows} artículos con sugerencia inversa**. "
-                        f"Mostrando los primeros **{view_limit}** en la tabla."
-                    )
                     df_view = df_inv.head(view_limit)
                 else:
-                    st.markdown(
-                        f"Se muestran **{total_rows} artículos con sugerencia inversa**."
-                    )
                     df_view = df_inv
 
                 styler_inv = style_class_colors(df_view)
