@@ -797,6 +797,26 @@ with m7:
 st.markdown("")
 
 # ---------------------------------------------------------------------
+# NUEVO: DESCARGAR TODAS LAS CLASIFICACIONES DEL ALMACÉN
+# ---------------------------------------------------------------------
+if origen_sel != "Todos":
+    origin_inv_col = origen_sel
+    origin_class_col = class_cols[origin_inv_col]
+    df_clas = get_origin_df(data, origin_inv_col, origin_class_col)
+    # opcional: ordenar
+    df_clas = df_clas.sort_values(by=["Clasificacion", "Clave"])
+
+    csv_clas = df_clas.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "⬇️ Descargar TODAS las clasificaciones de este almacén (CSV)",
+        data=csv_clas,
+        file_name=f"clasificaciones_{origin_inv_col}.csv",
+        mime="text/csv",
+    )
+else:
+    st.info("Selecciona un **almacén específico** para descargar todas sus clasificaciones.")
+
+# ---------------------------------------------------------------------
 # TABS
 # ---------------------------------------------------------------------
 tab_buscar, tab_sugeridos, tab_inversos = st.tabs(
