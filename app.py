@@ -487,103 +487,6 @@ Con esa información, la herramienta te ayuda a:
 - Ver **dónde sobran productos lentos (C / Sin movimiento)**.
 - Ver **dónde faltan productos importantes (A/B)**.
 - Generar listas de productos que se podrían **mover entre almacenes**.
-
----
-
-### 1️⃣ Controles de arriba (Filtros principales)
-
-#### 🏬 Almacén que estoy revisando (origen)
-
-Aquí eliges la sucursal que quieres analizar, por ejemplo:
-
-- Matriz  
-- Adelitas  
-- Berriozabal  
-- etc.
-
-Cuando eliges **Todos**, los números de los KPI se calculan con **todos los almacenes juntos**, pero las sugerencias detalladas solo funcionan cuando escoges **un almacén específico**.
-
-#### 🧭 Almacenes de donde puedo solicitar / enviar
-
-Este es un cuadro con varios almacenes donde puedes marcar uno o varios.
-
-Se usa en:
-
-- **Sugeridos de traslado** → el almacén origen recibe producto desde estos almacenes.
-- **Sugeridos inversos** → el almacén origen manda producto a estos almacenes.
-
----
-
-### 2️⃣ Tarjetas amarillas (KPI de inventario)
-
-1. **SKU en archivo / SKU en origen**  
-   - Cuenta cuántos productos diferentes (**Clave**) existen.
-
-2. **SKU´s activos**  
-   Suma de:
-   - Todos los productos **A**
-   - + todos los **B**
-   - + todos los **C**
-   - + productos **Sin movimiento con existencia > 0**
-
-3. **SKU (A/B con existencia 0)**  
-   - Cuenta productos con clasificación **A o B** y existencia **= 0** en el almacén origen.
-
-4. **Clasificación SKU A / B / C**  
-   - Cada tarjeta cuenta **todos** los productos de esa clasificación (aunque tengan 0 o negativo).
-   - El porcentaje es sobre los **SKU activos**.
-
-7. **Sin movimiento**  
-   - Cuenta productos “Sin movimiento” con **existencia > 0**.
-
----
-
-### 3️⃣ Pestaña “🔎 Buscador”
-
-- Escribe parte del **Código**, **Clave** o **Descripción**.
-- La tabla muestra todos los productos que coinciden.
-- Si hay muchas filas (más de 1500), se muestran todas pero sin colores para que cargue más rápido.
-
-Colores por almacén:
-
-- 🟢 A/B con existencia > 0  
-- 🔵 A/B con existencia = 0  
-- 🟠 C con existencia > 0  
-- 🔴 Sin movimiento con existencia > 0  
-
----
-
-### 4️⃣ Pestaña “📦 Sugeridos de traslado”
-
-> Productos A/B del origen (sin importar existencia) que se podrían traer desde otras sucursales donde son C o Sin movimiento y tienen existencia > 0.
-
-Cada fila muestra:
-
-- Código, Clave, Descripción
-- Almacén origen, existencia y clasificación
-- Almacén destino, existencia y clasificación
-
-La tabla incluye **todos los sugeridos** y puedes descargar el CSV completo.
-
----
-
-### 5️⃣ Pestaña “♻️ Sugeridos inversos”
-
-> Productos C o Sin movimiento (con existencia > 0) del origen que se podrían enviar a sucursales donde son A/B.
-
-- Puedes descargar:
-  - Un CSV con **todos** los C / Sin mov del origen.
-  - Ver una tabla con todos los que además tienen sucursal destino A/B.
-
----
-
-### 6️⃣ Existencias negativas
-
-Si algún producto tiene existencia **negativa**:
-
-- Aparece en el buscador.
-- No participa en reglas que piden existencia > 0.
-- Es una señal para revisar ese producto en el sistema o en inventarios físicos.
     """)
 
 # ---------------------------------------------------------------------
@@ -788,10 +691,13 @@ tab_buscar, tab_sugeridos, tab_inversos = st.tabs(
     ["🔎 Buscador", "📦 Sugeridos de traslado", "♻️ Sugeridos inversos"]
 )
 
+# =====================================================================
+# TAB BUSCADOR
+# =====================================================================
 with tab_buscar:
     st.markdown("#### Buscador de artículos")
     busqueda = st.text_input(
-        "Buscar por Código, Clave o Descripción (deja vacío para ver todo):",
+        "Buscar por Código, Clave o Descripción (máximo 500 filas en pantalla):",
         value="",
     )
 
@@ -805,7 +711,18 @@ with tab_buscar:
             | df_buscar["Codigo"].astype(str).str.lower().str.contains(txt)
         )
         df_buscar = df_buscar[mask]
-    # SIN head(500): ahora siempre se muestra la tabla completa
+
+    # Limitar a 500 filas en pantalla para que sea más rápido
+    total_rows = len(df_buscar)
+    view_limit = 500
+    if total_rows > view_limit:
+        st.markdown(
+            f"Se encontraron **{total_rows} artículos**. "
+            f"Mostrando solo los primeros **{view_limit}** para mejorar el rendimiento."
+        )
+        df_view = df_buscar.head(view_limit)
+    else:
+        df_view = df_buscar
 
     cols_show = ["Codigo", "Clave", "Descripcion"]
     for inv in inv_cols:
@@ -814,27 +731,30 @@ with tab_buscar:
         if cls is not None:
             cols_show.append(cls)
 
-    df_buscar = df_buscar[cols_show].copy()
+    df_view = df_view[cols_show].copy()
 
     for col in inv_cols:
-        df_buscar[col] = pd.to_numeric(
-            df_buscar[col], errors="coerce"
+        df_view[col] = pd.to_numeric(
+            df_view[col], errors="coerce"
         ).fillna(0).astype(int)
 
-    if len(df_buscar) <= 1500:
+    if len(df_view) <= 1500:
         styler_buscar = style_class_colors(
-            df_buscar, pairs_for_buscar=[(c, class_cols[c]) for c in inv_cols]
+            df_view, pairs_for_buscar=[(c, class_cols[c]) for c in inv_cols]
         )
         styler_buscar = styler_buscar.format(format_int, subset=inv_cols)
         st.dataframe(styler_buscar, use_container_width=True, height=480, hide_index=True)
     else:
-        df_buscar_display = df_buscar.copy()
+        df_buscar_display = df_view.copy()
         for col in inv_cols:
             df_buscar_display[col] = df_buscar_display[col].apply(format_int)
 
         st.info("Tabla muy grande: se muestra sin colores para optimizar el rendimiento.")
         st.dataframe(df_buscar_display, use_container_width=True, height=480, hide_index=True)
 
+# =====================================================================
+# TAB SUGERIDOS
+# =====================================================================
 with tab_sugeridos:
     st.markdown("#### Sugeridos de traslado (reposiciones hacia el origen)")
 
@@ -857,19 +777,27 @@ with tab_sugeridos:
             st.warning("No se encontraron sugerencias de traslado con los criterios actuales.")
         else:
             total_rows = len(df_sug)
-            st.markdown(
-                f"Se muestran **{total_rows} artículos** (tabla completa)."
-            )
+            view_limit = 500
+            if total_rows > view_limit:
+                st.markdown(
+                    f"Se encontraron **{total_rows} artículos**. "
+                    f"Mostrando solo los primeros **{view_limit}** en la tabla para que cargue más rápido."
+                )
+                df_view = df_sug.head(view_limit)
+            else:
+                st.markdown(f"Se muestran **{total_rows} artículos**.")
+                df_view = df_sug
 
+            # CSV SIEMPRE CON TODAS LAS FILAS
             csv_sug = df_sug.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                "⬇️ Descargar sugeridos (CSV)",
+                "⬇️ Descargar sugeridos (CSV - tabla completa)",
                 data=csv_sug,
                 file_name=f"sugeridos_{origin_inv_col}.csv",
                 mime="text/csv",
             )
 
-            styler_sug = style_class_colors(df_sug)
+            styler_sug = style_class_colors(df_view)
             styler_sug = styler_sug.format(
                 format_int,
                 subset=[
@@ -879,6 +807,9 @@ with tab_sugeridos:
             )
             st.dataframe(styler_sug, use_container_width=True, height=520, hide_index=True)
 
+# =====================================================================
+# TAB SUGERIDOS INVERSOS
+# =====================================================================
 with tab_inversos:
     st.markdown("#### Sugeridos inversos (salidas desde C / Sin movimiento hacia A/B)")
 
@@ -910,26 +841,43 @@ with tab_inversos:
             )
         else:
             # CSV con TODOS los C / Sin mov > 0 del origen
-            csv_inv = df_base_cs.to_csv(index=False).encode("utf-8-sig")
+            csv_base = df_base_cs.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Descargar TODOS los SKU C / Sin mov del origen (CSV)",
-                data=csv_inv,
+                data=csv_base,
                 file_name=f"c_sinmov_{origin_inv_col}.csv",
                 mime="text/csv",
             )
 
-            # Tabla en pantalla: TODOS los sugeridos inversos
             if df_inv.empty:
                 st.info(
                     "No se encontraron destinos A/B para proponer traslados desde estos C / Sin movimiento."
                 )
             else:
                 total_rows = len(df_inv)
-                st.markdown(
-                    f"Se muestran **{total_rows} artículos con sugerencia inversa** (tabla completa)."
+                view_limit = 500
+                if total_rows > view_limit:
+                    st.markdown(
+                        f"Se encontraron **{total_rows} artículos con sugerencia inversa**. "
+                        f"Mostrando solo los primeros **{view_limit}** en la tabla."
+                    )
+                    df_view = df_inv.head(view_limit)
+                else:
+                    st.markdown(
+                        f"Se muestran **{total_rows} artículos con sugerencia inversa**."
+                    )
+                    df_view = df_inv
+
+                # CSV con TODAS las sugerencias inversas
+                csv_inv = df_inv.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "⬇️ Descargar sugeridos inversos (CSV - tabla completa)",
+                    data=csv_inv,
+                    file_name=f"sugeridos_inversos_{origin_inv_col}.csv",
+                    mime="text/csv",
                 )
 
-                styler_inv = style_class_colors(df_inv)
+                styler_inv = style_class_colors(df_view)
                 styler_inv = styler_inv.format(
                     format_int,
                     subset=[
