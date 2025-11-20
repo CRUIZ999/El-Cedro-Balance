@@ -193,8 +193,7 @@ def build_suggestions(
 ):
     """
     Genera sugerencias de traslado desde varios almacenes destino
-    hacia un único almacén origen.
-    Considera A/B aunque la existencia en origen sea 0.
+    hacia un único almacén origen (A/B bajos en origen, C/SinMov en destino).
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -206,7 +205,7 @@ def build_suggestions(
     ).fillna(0).astype(int)
     data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
 
-    # 👇 AQUÍ EL AJUSTE: incluimos existencia 0, solo pedimos que sea menor al umbral y no negativa
+    # A/B en origen, con existencia menor al umbral (incluye 0)
     data_filtrada = data_filtrada[
         (data_filtrada["__clas_o__"].isin(["A", "B"])) &
         (data_filtrada["__exist_o__"] >= 0) &
@@ -275,6 +274,96 @@ def build_suggestions(
     return df_sug
 
 
+def build_reverse_suggestions(
+    data,
+    inv_cols,
+    class_cols,
+    origin_inv_col: str,
+    dest_inv_cols: list,
+    umbral_bajos_ab: int,
+):
+    """
+    Análisis inverso:
+    - Origen: tiene C o Sin Mov con existencia > 0.
+    - Destino: tiene A o B con existencia < umbral.
+    Sugiere mover excedentes desde C/SinMov hacia A/B.
+    """
+    origin_class_col = class_cols[origin_inv_col]
+    registros = []
+
+    data_filtrada = data.copy()
+    data_filtrada["__exist_o__"] = pd.to_numeric(
+        data_filtrada[origin_inv_col], errors="coerce"
+    ).fillna(0).astype(int)
+    data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
+
+    # C o SinMov en origen, con existencia > 0
+    mask_c = data_filtrada["__clas_o__"] == "C"
+    mask_sin = data_filtrada["__clas_o__"].str.lower().str.contains("sin")
+    data_filtrada = data_filtrada[
+        (data_filtrada["__exist_o__"] > 0) & (mask_c | mask_sin)
+    ]
+
+    for _, row in data_filtrada.iterrows():
+        cod = row["Codigo"]
+        clave = row["Clave"]
+        desc = row["Descripcion"]
+
+        exist_o = int(row["__exist_o__"])
+        clas_o = row["__clas_o__"]
+
+        for dest_inv_col in dest_inv_cols:
+            dest_class_col = class_cols[dest_inv_col]
+            exist_d = int(row[dest_inv_col])
+            clas_d = str(row[dest_class_col]).strip()
+
+            # Destino debe ser A/B y estar por debajo del umbral
+            if clas_d not in ["A", "B"]:
+                continue
+
+            faltante_dest = max(0, umbral_bajos_ab - exist_d)
+            if faltante_dest <= 0:
+                continue
+
+            sugerido = min(exist_o, faltante_dest)
+            if sugerido <= 0:
+                continue
+
+            registros.append(
+                {
+                    "Codigo": cod,
+                    "Clave": clave,
+                    "Descripción": desc,
+                    "Almacén origen": origin_inv_col,
+                    "Existencia origen": exist_o,
+                    "Clasif. origen": clas_o,
+                    "Almacén destino": dest_inv_col,
+                    "Existencia destino": exist_d,
+                    "Clasif. destino": clas_d,
+                    "Faltante destino": faltante_dest,
+                    "Sugerido trasladar": sugerido,
+                }
+            )
+
+    if not registros:
+        return pd.DataFrame()
+
+    df_sug = pd.DataFrame(registros)
+    df_sug = df_sug.sort_values(
+        by=["Sugerido trasladar", "Clave"], ascending=[False, True]
+    ).head(50)
+
+    for col in [
+        "Existencia origen",
+        "Existencia destino",
+        "Faltante destino",
+        "Sugerido trasladar",
+    ]:
+        df_sug[col] = pd.to_numeric(df_sug[col], errors="coerce").fillna(0).astype(int)
+
+    return df_sug
+
+
 def style_class_colors(df, pairs_for_buscar=None):
     """
     Colorea según clasificación:
@@ -319,7 +408,7 @@ def style_class_colors(df, pairs_for_buscar=None):
                             styles[idx] = f"background-color: {color}; color: white;"
 
         else:
-            # Tabla sugeridos
+            # Tablas de sugeridos
             try:
                 exist_o = float(row["Existencia origen"])
             except Exception:
@@ -413,7 +502,7 @@ if origen_sel == "Todos":
 else:
     opciones_destino = [w for w in warehouses if w != origen_sel]
     destinos_sel = st.multiselect(
-        "Almacenes de donde puedo solicitar",
+        "Almacenes de donde puedo solicitar / enviar",
         opciones_destino,
         default=opciones_destino,
     )
@@ -585,7 +674,9 @@ st.markdown("")
 # ---------------------------------------------------------------------
 # TABS: BUSCADOR Y SUGERIDOS
 # ---------------------------------------------------------------------
-tab_buscar, tab_sugeridos = st.tabs(["🔎 Buscador", "📦 Sugeridos de traslado"])
+tab_buscar, tab_sugeridos, tab_inversos = st.tabs(
+    ["🔎 Buscador", "📦 Sugeridos de traslado", "♻️ Sugeridos inversos"]
+)
 
 with tab_buscar:
     st.markdown("#### Buscador de artículos")
@@ -641,7 +732,7 @@ with tab_buscar:
         st.dataframe(df_buscar_display, use_container_width=True, height=480, hide_index=True)
 
 with tab_sugeridos:
-    st.markdown("#### Sugeridos de traslado")
+    st.markdown("#### Sugeridos de traslado (reposiciones hacia el origen)")
 
     if origen_sel == "Todos":
         st.info("Selecciona un **almacén específico** como origen para ver sugerencias.")
@@ -675,3 +766,39 @@ with tab_sugeridos:
                 ],
             )
             st.dataframe(styler_sug, use_container_width=True, height=520, hide_index=True)
+
+with tab_inversos:
+    st.markdown("#### Sugeridos inversos (salidas desde C / Sin movimiento hacia A/B)")
+
+    if origen_sel == "Todos":
+        st.info("Selecciona un **almacén específico** como origen para ver sugerencias inversas.")
+    elif not destinos_sel:
+        st.info("Selecciona al menos **un almacén destino** para calcular sugerencias inversas.")
+    else:
+        origin_inv_col = origen_sel
+        df_inv = build_reverse_suggestions(
+            data,
+            inv_cols,
+            class_cols,
+            origin_inv_col=origin_inv_col,
+            dest_inv_cols=destinos_sel,
+            umbral_bajos_ab=umbral_bajos_ab,
+        )
+
+        if df_inv.empty:
+            st.warning("No se encontraron sugerencias inversas con los criterios actuales.")
+        else:
+            st.markdown(
+                f"Se muestran hasta **{len(df_inv)} artículos** (ordenados por mayor sugerencia)."
+            )
+            styler_inv = style_class_colors(df_inv)
+            styler_inv = styler_inv.format(
+                format_int,
+                subset=[
+                    "Existencia origen",
+                    "Existencia destino",
+                    "Faltante destino",
+                    "Sugerido trasladar",
+                ],
+            )
+            st.dataframe(styler_inv, use_container_width=True, height=520, hide_index=True)
