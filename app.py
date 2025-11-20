@@ -131,7 +131,7 @@ def compute_kpis(df_origin, umbral_bajos_ab: int):
     Calcula:
     - skus_totales
     - skus_activos
-    - bajos_ab
+    - bajos_ab (A/B con existencia = 0)
     - conteo por clasificacion A/B/C
     - conteo de Sin Mov con existencia > 0
     """
@@ -147,11 +147,9 @@ def compute_kpis(df_origin, umbral_bajos_ab: int):
 
     skus_activos = df[mask_abc | mask_sinmov_con_exist]["Clave"].nunique()
 
-    # Bajos A/B (críticos)
+    # Bajos A/B = existencia 0
     mask_ab = df["Clasificacion"].isin(["A", "B"])
-    bajos_ab = df[mask_ab & (df["Existencia"] > 0) & (df["Existencia"] <= umbral_bajos_ab)][
-        "Clave"
-    ].nunique()
+    bajos_ab = df[mask_ab & (df["Existencia"] == 0)]["Clave"].nunique()
 
     conteo_A = df[df["Clasificacion"] == "A"]["Clave"].nunique()
     conteo_B = df[df["Clasificacion"] == "B"]["Clave"].nunique()
@@ -193,23 +191,26 @@ def build_suggestions(
 ):
     """
     Genera sugerencias de traslado desde varios almacenes destino
-    hacia un único almacén origen (A/B bajos en origen, C/SinMov en destino).
+    hacia un único almacén origen.
+
+    Nueva lógica:
+    - Origen: clasificación A/B con existencia = 0.
+    - Destino: clasificación C o Sin movimiento, con existencia > 0.
+    - Ya no se usa umbral ni se muestran columnas de faltante/sugerido.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
 
-    # Filtrar primero sólo lo relevante para el origen (mejora rendimiento)
     data_filtrada = data.copy()
     data_filtrada["__exist_o__"] = pd.to_numeric(
         data_filtrada[origin_inv_col], errors="coerce"
     ).fillna(0).astype(int)
     data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
 
-    # A/B en origen, con existencia menor al umbral (incluye 0)
+    # A/B en origen con existencia = 0
     data_filtrada = data_filtrada[
         (data_filtrada["__clas_o__"].isin(["A", "B"])) &
-        (data_filtrada["__exist_o__"] >= 0) &
-        (data_filtrada["__exist_o__"] < umbral_bajos_ab)
+        (data_filtrada["__exist_o__"] == 0)
     ]
 
     for _, row in data_filtrada.iterrows():
@@ -220,10 +221,6 @@ def build_suggestions(
         exist_o = int(row["__exist_o__"])
         clas_o = row["__clas_o__"]
 
-        faltante = max(0, umbral_bajos_ab - exist_o)
-        if faltante <= 0:
-            continue
-
         for dest_inv_col in dest_inv_cols:
             dest_class_col = class_cols[dest_inv_col]
             exist_d = int(row[dest_inv_col])
@@ -233,10 +230,6 @@ def build_suggestions(
                 continue
 
             if not (clas_d == "C" or "sin" in clas_d.lower()):
-                continue
-
-            sugerido = min(exist_d, faltante)
-            if sugerido <= 0:
                 continue
 
             registros.append(
@@ -250,8 +243,6 @@ def build_suggestions(
                     "Almacén destino": dest_inv_col,
                     "Existencia destino": exist_d,
                     "Clasif. destino": clas_d,
-                    "Faltante destino": faltante,
-                    "Sugerido trasladar": sugerido,
                 }
             )
 
@@ -260,7 +251,7 @@ def build_suggestions(
 
     df_sug = pd.DataFrame(registros)
     df_sug = df_sug.sort_values(
-        by=["Sugerido trasladar", "Clave"], ascending=[False, True]
+        by=["Existencia destino", "Clave"], ascending=[False, True]
     )
     return df_sug
 
@@ -271,13 +262,13 @@ def build_reverse_suggestions(
     class_cols,
     origin_inv_col: str,
     dest_inv_cols: list,
-    umbral_bajos_ab: int,  # ya no se usa, pero lo dejamos para no romper llamadas
+    umbral_bajos_ab: int,  # no se usa
 ):
     """
     Análisis inverso SIN UMBRAL:
     - Origen: C o Sin Mov con existencia > 0.
     - Destino: A o B (no importa cuánta existencia tengan).
-    - Sugerido: hasta la MITAD del inventario del origen o máximo 30 unidades.
+    - Ya no se muestra columna de 'Sugerido trasladar'.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -301,22 +292,13 @@ def build_reverse_suggestions(
         exist_o = int(row["__exist_o__"])
         clas_o = row["__clas_o__"]
 
-        # límite global de traslado desde este origen
-        max_transfer_global = min(int(exist_o / 2), 30)
-        if max_transfer_global <= 0:
-            continue
-
         for dest_inv_col in dest_inv_cols:
             dest_class_col = class_cols[dest_inv_col]
             exist_d = int(row[dest_inv_col])
             clas_d = str(row[dest_class_col]).strip()
 
-            # Destino debe ser A/B; ya no usamos umbral
+            # Destino debe ser A/B
             if clas_d not in ["A", "B"]:
-                continue
-
-            sugerido = max_transfer_global
-            if sugerido <= 0:
                 continue
 
             registros.append(
@@ -330,7 +312,6 @@ def build_reverse_suggestions(
                     "Almacén destino": dest_inv_col,
                     "Existencia destino": exist_d,
                     "Clasif. destino": clas_d,
-                    "Sugerido trasladar": sugerido,
                 }
             )
 
@@ -339,7 +320,7 @@ def build_reverse_suggestions(
 
     df_sug = pd.DataFrame(registros)
     df_sug = df_sug.sort_values(
-        by=["Sugerido trasladar", "Clave"], ascending=[False, True]
+        by=["Existencia origen", "Clave"], ascending=[False, True]
     )
     return df_sug
 
@@ -496,13 +477,16 @@ with col_f1:
         index=origin_index,
     )
 
+# Umbral ya no se usa; solo explicamos la nueva lógica de KPI
 with col_f2:
-    umbral_bajos_ab = st.slider(
-        "Umbral de existencia baja (para KPI de críticos A/B)",
-        min_value=1,
-        max_value=100,
-        value=50,
+    st.markdown(
+        "**KPI A/B (SKU con existencia 0):**\n\n"
+        "- Cuenta SKU con clasificación **A** o **B**\n"
+        "- Y **existencia = 0** en el almacén origen."
     )
+
+# Valor dummy para mantener firmas de funciones
+umbral_bajos_ab = 0
 
 # Destinos (solo si no es 'Todos')
 if origen_sel == "Todos":
@@ -622,7 +606,7 @@ with m3:
     st.markdown(
         f"""
         <div class="metric-card">
-            <div class="metric-label">SKU (Bajos A/B)</div>
+            <div class="metric-label">SKU (A/B en 0)</div>
             <div class="metric-value">{format_int(kpis_to_show['bajos_ab'])}</div>
         </div>
         """,
@@ -788,8 +772,6 @@ with tab_sugeridos:
                 subset=[
                     "Existencia origen",
                     "Existencia destino",
-                    "Faltante destino",
-                    "Sugerido trasladar",
                 ],
             )
             st.dataframe(styler_sug, use_container_width=True, height=520, hide_index=True)
@@ -838,7 +820,7 @@ with tab_inversos:
                 f"y aparecen en la tabla de sugeridos inversos."
             )
 
-            # CSV con TODOS los C / Sin mov > 0 del origen (cuadra con el KPI)
+            # CSV con TODOS los C / Sin mov > 0 del origen (cuadra con el KPI de C/SinMov)
             csv_inv = df_base_cs.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Descargar TODOS los SKU C / Sin mov del origen (CSV)",
@@ -873,7 +855,6 @@ with tab_inversos:
                     subset=[
                         "Existencia origen",
                         "Existencia destino",
-                        "Sugerido trasladar",
                     ],
                 )
                 st.dataframe(
