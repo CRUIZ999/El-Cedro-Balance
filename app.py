@@ -200,7 +200,8 @@ def build_suggestions(
 ):
     """
     Sugeridos normales (reposiciones hacia el origen):
-    - Origen: A/B con existencia = 0.
+
+    - Origen: clasificación A o B (SIN importar su existencia).
     - Destino: C o Sin mov con existencia > 0.
     """
     origin_class_col = class_cols[origin_inv_col]
@@ -212,11 +213,8 @@ def build_suggestions(
     ).fillna(0).astype(int)
     data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
 
-    # A/B en origen con existencia = 0
-    data_filtrada = data_filtrada[
-        (data_filtrada["__clas_o__"].isin(["A", "B"])) &
-        (data_filtrada["__exist_o__"] == 0)
-    ]
+    # Solo A/B, sin filtrar por existencia
+    data_filtrada = data_filtrada[data_filtrada["__clas_o__"].isin(["A", "B"])]
 
     for _, row in data_filtrada.iterrows():
         cod = row["Codigo"]
@@ -231,9 +229,11 @@ def build_suggestions(
             exist_d = int(row[dest_inv_col])
             clas_d = str(row[dest_class_col]).strip()
 
+            # Destino debe tener stock disponible
             if exist_d <= 0:
                 continue
 
+            # Destino debe ser C o Sin movimiento
             if not (clas_d == "C" or "sin" in clas_d.lower()):
                 continue
 
@@ -501,19 +501,11 @@ Aquí eliges la sucursal que quieres analizar, por ejemplo:
 - Berriozabal  
 - etc.
 
-Esto le dice a la app:
-
-> “Quiero revisar cómo está el inventario de **este almacén**.”
-
-Cuando eliges **Todos**, los números de los KPI se calculan con **todos los almacenes juntos**, pero las sugerencias de traslado detalladas solo funcionan cuando escoges **un almacén específico**.
+Cuando eliges **Todos**, los números de los KPI se calculan con **todos los almacenes juntos**, pero las sugerencias detalladas solo funcionan cuando escoges **un almacén específico**.
 
 #### 🧭 Almacenes de donde puedo solicitar / enviar
 
 Este es un cuadro con varios almacenes donde puedes marcar uno o varios.
-
-Significa:
-
-> “De **estos almacenes** sí puedo mandar o recibir mercancía.”
 
 Se usa en:
 
@@ -524,98 +516,64 @@ Se usa en:
 
 ### 2️⃣ Tarjetas amarillas (KPI de inventario)
 
-Debajo de los filtros verás 7 tarjetas amarillas. Cada una resume algo importante del inventario.
-
 1. **SKU en archivo / SKU en origen**  
    - Cuenta cuántos productos diferentes (**Clave**) existen.
-   - Si origen = Todos → cuenta del archivo completo.
-   - Si origen = una sucursal → cuenta solo en ese almacén.
 
 2. **SKU´s activos**  
-   Es la suma de:
+   Suma de:
    - Todos los productos **A**
-   - + todos los productos **B**
-   - + todos los productos **C**
-   - + todos los productos **Sin movimiento con existencia > 0**
+   - + todos los **B**
+   - + todos los **C**
+   - + productos **Sin movimiento con existencia > 0**
 
 3. **SKU (A/B con existencia 0)**  
-   - Cuenta cuántos productos con clasificación **A o B**  
-   - Tienen existencia **= 0** en el almacén origen.
+   - Cuenta productos con clasificación **A o B** y existencia **= 0** en el almacén origen.
 
-4. **Clasificación SKU A**  
-   - Cuenta **todos los productos que son A**, sin importar la existencia.
-   - El porcentaje que se ve abajo es:  
-     `SKU A / SKU activos`.
-
-5. **Clasificación SKU B**  
-   - Cuenta **todos los productos que son B**, sin importar la existencia.
-   - El porcentaje es:  
-     `SKU B / SKU activos`.
-
-6. **Clasificación SKU C**  
-   - Cuenta **todos los productos que son C**, sin importar la existencia.
-   - El porcentaje es:  
-     `SKU C / SKU activos`.
+4. **Clasificación SKU A / B / C**  
+   - Cada tarjeta cuenta **todos** los productos de esa clasificación (aunque tengan 0 o negativo).
+   - El porcentaje es sobre los **SKU activos**.
 
 7. **Sin movimiento**  
-   - Cuenta los productos cuya clasificación dice “Sin movimiento” (o similar)  
-   - Y tienen **existencia > 0**.
-   - El porcentaje es:  
-     `SKU Sin movimiento (con existencia > 0) / SKU activos`.
+   - Cuenta productos “Sin movimiento” con **existencia > 0**.
 
 ---
 
 ### 3️⃣ Pestaña “🔎 Buscador”
 
-Sirve para **buscar productos individuales** y ver cómo están en cada almacén.
-
 - Escribe parte del **Código**, **Clave** o **Descripción**.
-- La tabla mostrará solo los productos que coincidan.
-- Si la caja está vacía, se muestra una muestra de hasta **500 productos**.
+- La tabla muestra todos los productos que coinciden.
+- Si hay muchas filas (más de 1500), se muestran todas pero sin colores para que cargue más rápido.
 
 Colores por almacén:
 
-- 🟢 Verde → A o B y existencia **> 0**
-- 🔵 Azul → A o B y existencia **= 0**
-- 🟠 Naranja → C y existencia **> 0**
-- 🔴 Rojo → Sin movimiento y existencia **> 0**
+- 🟢 A/B con existencia > 0  
+- 🔵 A/B con existencia = 0  
+- 🟠 C con existencia > 0  
+- 🔴 Sin movimiento con existencia > 0  
 
 ---
 
 ### 4️⃣ Pestaña “📦 Sugeridos de traslado”
 
-Responde:
+> Productos A/B del origen (sin importar existencia) que se podrían traer desde otras sucursales donde son C o Sin movimiento y tienen existencia > 0.
 
-> “¿Qué productos importantes (A/B) están en **cero** en este almacén, y existen como C o Sin mov en otras sucursales?”
-
-Reglas:
-
-- Origen: A o B, existencia = 0.
-- Destino: C o Sin movimiento, existencia > 0.
-
-La tabla muestra:
+Cada fila muestra:
 
 - Código, Clave, Descripción
 - Almacén origen, existencia y clasificación
 - Almacén destino, existencia y clasificación
 
-Puedes descargar todos los sugeridos en un archivo CSV.
+La tabla incluye **todos los sugeridos** y puedes descargar el CSV completo.
 
 ---
 
 ### 5️⃣ Pestaña “♻️ Sugeridos inversos”
 
-Responde:
+> Productos C o Sin movimiento (con existencia > 0) del origen que se podrían enviar a sucursales donde son A/B.
 
-> “¿Qué productos lentos (C o Sin movimiento) podrían salir de este almacén hacia sucursales donde son A o B?”
-
-Primero se arma una lista con todos los productos:
-
-- Clasificación C o Sin movimiento
-- Existencia > 0 en el almacén origen
-
-Esa lista se puede descargar completa (CSV).  
-Luego se arma una tabla solo con los que tienen sucursales destino A/B.
+- Puedes descargar:
+  - Un CSV con **todos** los C / Sin mov del origen.
+  - Ver una tabla con todos los que además tienen sucursal destino A/B.
 
 ---
 
@@ -625,7 +583,7 @@ Si algún producto tiene existencia **negativa**:
 
 - Aparece en el buscador.
 - No participa en reglas que piden existencia > 0.
-- Es una señal de que hay algo que revisar en el sistema o en inventarios físicos.
+- Es una señal para revisar ese producto en el sistema o en inventarios físicos.
     """)
 
 # ---------------------------------------------------------------------
@@ -833,11 +791,11 @@ tab_buscar, tab_sugeridos, tab_inversos = st.tabs(
 with tab_buscar:
     st.markdown("#### Buscador de artículos")
     busqueda = st.text_input(
-        "Buscar por Código, Clave o Descripción (deja vacío para ver una muestra):",
+        "Buscar por Código, Clave o Descripción (deja vacío para ver todo):",
         value="",
     )
 
-    df_buscar = data
+    df_buscar = data.copy()
 
     if busqueda.strip():
         txt = busqueda.strip().lower()
@@ -847,8 +805,7 @@ with tab_buscar:
             | df_buscar["Codigo"].astype(str).str.lower().str.contains(txt)
         )
         df_buscar = df_buscar[mask]
-    else:
-        df_buscar = df_buscar.head(500)
+    # SIN head(500): ahora siempre se muestra la tabla completa
 
     cols_show = ["Codigo", "Clave", "Descripcion"]
     for inv in inv_cols:
@@ -900,18 +857,9 @@ with tab_sugeridos:
             st.warning("No se encontraron sugerencias de traslado con los criterios actuales.")
         else:
             total_rows = len(df_sug)
-            view_limit = 500
-            if total_rows > view_limit:
-                st.markdown(
-                    f"Se encontraron **{total_rows} artículos**. "
-                    f"Mostrando los primeros **{view_limit}** en la tabla."
-                )
-                df_view = df_sug.head(view_limit)
-            else:
-                st.markdown(
-                    f"Se muestran **{total_rows} artículos**."
-                )
-                df_view = df_sug
+            st.markdown(
+                f"Se muestran **{total_rows} artículos** (tabla completa)."
+            )
 
             csv_sug = df_sug.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
@@ -921,7 +869,7 @@ with tab_sugeridos:
                 mime="text/csv",
             )
 
-            styler_sug = style_class_colors(df_view)
+            styler_sug = style_class_colors(df_sug)
             styler_sug = styler_sug.format(
                 format_int,
                 subset=[
@@ -970,20 +918,18 @@ with tab_inversos:
                 mime="text/csv",
             )
 
-            # Tabla en pantalla: solo los que tienen sugerencia concreta (df_inv)
+            # Tabla en pantalla: TODOS los sugeridos inversos
             if df_inv.empty:
                 st.info(
                     "No se encontraron destinos A/B para proponer traslados desde estos C / Sin movimiento."
                 )
             else:
                 total_rows = len(df_inv)
-                view_limit = 500
-                if total_rows > view_limit:
-                    df_view = df_inv.head(view_limit)
-                else:
-                    df_view = df_inv
+                st.markdown(
+                    f"Se muestran **{total_rows} artículos con sugerencia inversa** (tabla completa)."
+                )
 
-                styler_inv = style_class_colors(df_view)
+                styler_inv = style_class_colors(df_inv)
                 styler_inv = styler_inv.format(
                     format_int,
                     subset=[
