@@ -261,16 +261,7 @@ def build_suggestions(
     df_sug = pd.DataFrame(registros)
     df_sug = df_sug.sort_values(
         by=["Sugerido trasladar", "Clave"], ascending=[False, True]
-    ).head(50)
-
-    for col in [
-        "Existencia origen",
-        "Existencia destino",
-        "Faltante destino",
-        "Sugerido trasladar",
-    ]:
-        df_sug[col] = pd.to_numeric(df_sug[col], errors="coerce").fillna(0).astype(int)
-
+    )
     return df_sug
 
 
@@ -351,16 +342,7 @@ def build_reverse_suggestions(
     df_sug = pd.DataFrame(registros)
     df_sug = df_sug.sort_values(
         by=["Sugerido trasladar", "Clave"], ascending=[False, True]
-    ).head(50)
-
-    for col in [
-        "Existencia origen",
-        "Existencia destino",
-        "Faltante destino",
-        "Sugerido trasladar",
-    ]:
-        df_sug[col] = pd.to_numeric(df_sug[col], errors="coerce").fillna(0).astype(int)
-
+    )
     return df_sug
 
 
@@ -752,10 +734,30 @@ with tab_sugeridos:
         if df_sug.empty:
             st.warning("No se encontraron sugerencias de traslado con los criterios actuales.")
         else:
-            st.markdown(
-                f"Se muestran hasta **{len(df_sug)} artículos** (ordenados por mayor sugerencia)."
+            total_rows = len(df_sug)
+            view_limit = 500
+            if total_rows > view_limit:
+                st.markdown(
+                    f"Se encontraron **{total_rows} artículos**. "
+                    f"Mostrando los primeros **{view_limit}** en la tabla."
+                )
+                df_view = df_sug.head(view_limit)
+            else:
+                st.markdown(
+                    f"Se muestran **{total_rows} artículos**."
+                )
+                df_view = df_sug
+
+            # Botón de descarga con TODAS las filas
+            csv_sug = df_sug.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Descargar sugeridos (CSV)",
+                data=csv_sug,
+                file_name=f"sugeridos_{origin_inv_col}.csv",
+                mime="text/csv",
             )
-            styler_sug = style_class_colors(df_sug)
+
+            styler_sug = style_class_colors(df_view)
             styler_sug = styler_sug.format(
                 format_int,
                 subset=[
@@ -788,10 +790,30 @@ with tab_inversos:
         if df_inv.empty:
             st.warning("No se encontraron sugerencias inversas con los criterios actuales.")
         else:
-            st.markdown(
-                f"Se muestran hasta **{len(df_inv)} artículos** (ordenados por mayor sugerencia)."
+            total_rows = len(df_inv)
+            view_limit = 500
+            if total_rows > view_limit:
+                st.markdown(
+                    f"Se encontraron **{total_rows} artículos**. "
+                    f"Mostrando los primeros **{view_limit}** en la tabla."
+                )
+                df_view = df_inv.head(view_limit)
+            else:
+                st.markdown(
+                    f"Se muestran **{total_rows} artículos**."
+                )
+                df_view = df_inv
+
+            # Botón de descarga con TODAS las filas
+            csv_inv = df_inv.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Descargar sugeridos inversos (CSV)",
+                data=csv_inv,
+                file_name=f"sugeridos_inversos_{origin_inv_col}.csv",
+                mime="text/csv",
             )
-            styler_inv = style_class_colors(df_inv)
+
+            styler_inv = style_class_colors(df_view)
             styler_inv = styler_inv.format(
                 format_int,
                 subset=[
