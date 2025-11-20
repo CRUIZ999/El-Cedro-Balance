@@ -133,6 +133,8 @@ def compute_kpis(df_origin, umbral_bajos_ab: int):
     - skus_activos
     - bajos_ab (A/B con existencia = 0)
     - conteo por clasificacion A/B/C
+      * A y B: todos los SKU A/B (independiente de existencia)
+      * C: SOLO C con existencia > 0  ✅
     - conteo de Sin Mov con existencia > 0
     """
     df = df_origin.copy()
@@ -151,9 +153,15 @@ def compute_kpis(df_origin, umbral_bajos_ab: int):
     mask_ab = df["Clasificacion"].isin(["A", "B"])
     bajos_ab = df[mask_ab & (df["Existencia"] == 0)]["Clave"].nunique()
 
+    # A y B: todos los SKU A/B
     conteo_A = df[df["Clasificacion"] == "A"]["Clave"].nunique()
     conteo_B = df[df["Clasificacion"] == "B"]["Clave"].nunique()
-    conteo_C = df[df["Clasificacion"] == "C"]["Clave"].nunique()
+
+    # ✅ C: SOLO C con existencia > 0
+    mask_c = df["Clasificacion"] == "C"
+    conteo_C = df[mask_c & (df["Existencia"] > 0)]["Clave"].nunique()
+
+    # Sin mov con existencia > 0
     conteo_sinmov = df[mask_sinmov_con_exist]["Clave"].nunique()
 
     def pct(v):
@@ -193,10 +201,10 @@ def build_suggestions(
     Genera sugerencias de traslado desde varios almacenes destino
     hacia un único almacén origen.
 
-    Nueva lógica:
+    Lógica:
     - Origen: clasificación A/B con existencia = 0.
     - Destino: clasificación C o Sin movimiento, con existencia > 0.
-    - Ya no se usa umbral ni se muestran columnas de faltante/sugerido.
+    - Sin columnas de faltante / sugerido.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -268,7 +276,7 @@ def build_reverse_suggestions(
     Análisis inverso SIN UMBRAL:
     - Origen: C o Sin Mov con existencia > 0.
     - Destino: A o B (no importa cuánta existencia tengan).
-    - Ya no se muestra columna de 'Sugerido trasladar'.
+    - Sin columna de 'Sugerido trasladar'.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -477,12 +485,13 @@ with col_f1:
         index=origin_index,
     )
 
-# Umbral ya no se usa; solo explicamos la nueva lógica de KPI
+# Umbral ya no se usa; solo explicamos la lógica del KPI
 with col_f2:
     st.markdown(
         "**KPI A/B (SKU con existencia 0):**\n\n"
         "- Cuenta SKU con clasificación **A** o **B**\n"
-        "- Y **existencia = 0** en el almacén origen."
+        "- Y **existencia = 0** en el almacén origen.\n\n"
+        "**KPI C:** solo SKU C con existencia > 0."
     )
 
 # Valor dummy para mantener firmas de funciones
@@ -820,7 +829,7 @@ with tab_inversos:
                 f"y aparecen en la tabla de sugeridos inversos."
             )
 
-            # CSV con TODOS los C / Sin mov > 0 del origen (cuadra con el KPI de C/SinMov)
+            # CSV con TODOS los C / Sin mov > 0 del origen (cuadra con KPI de C+SinMov)
             csv_inv = df_base_cs.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Descargar TODOS los SKU C / Sin mov del origen (CSV)",
