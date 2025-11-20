@@ -271,13 +271,13 @@ def build_reverse_suggestions(
     class_cols,
     origin_inv_col: str,
     dest_inv_cols: list,
-    umbral_bajos_ab: int,
+    umbral_bajos_ab: int,  # ya no se usa, pero lo dejamos para no romper llamadas
 ):
     """
-    Análisis inverso:
-    - Origen: tiene C o Sin Mov con existencia > 0.
-    - Destino: tiene A o B con existencia < umbral.
-    Sugiere mover excedentes desde C/SinMov hacia A/B.
+    Análisis inverso SIN UMBRAL:
+    - Origen: C o Sin Mov con existencia > 0.
+    - Destino: A o B (no importa cuánta existencia tengan).
+    - Sugerido: hasta la MITAD del inventario del origen o máximo 30 unidades.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -288,12 +288,10 @@ def build_reverse_suggestions(
     ).fillna(0).astype(int)
     data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
 
-    # C o SinMov en origen, con existencia > 0
+    # ORIGEN: C o Sin movimiento, con EXISTENCIA > 0
     mask_c = data_filtrada["__clas_o__"] == "C"
     mask_sin = data_filtrada["__clas_o__"].str.lower().str.contains("sin")
-    data_filtrada = data_filtrada[
-        (data_filtrada["__exist_o__"] > 0) & (mask_c | mask_sin)
-    ]
+    data_filtrada = data_filtrada[(data_filtrada["__exist_o__"] > 0) & (mask_c | mask_sin)]
 
     for _, row in data_filtrada.iterrows():
         cod = row["Codigo"]
@@ -303,20 +301,21 @@ def build_reverse_suggestions(
         exist_o = int(row["__exist_o__"])
         clas_o = row["__clas_o__"]
 
+        # límite global de traslado desde este origen
+        max_transfer_global = min(int(exist_o / 2), 30)
+        if max_transfer_global <= 0:
+            continue
+
         for dest_inv_col in dest_inv_cols:
             dest_class_col = class_cols[dest_inv_col]
             exist_d = int(row[dest_inv_col])
             clas_d = str(row[dest_class_col]).strip()
 
-            # Destino debe ser A/B y estar por debajo del umbral
+            # Destino debe ser A/B; ya no usamos umbral
             if clas_d not in ["A", "B"]:
                 continue
 
-            faltante_dest = max(0, umbral_bajos_ab - exist_d)
-            if faltante_dest <= 0:
-                continue
-
-            sugerido = min(exist_o, faltante_dest)
+            sugerido = max_transfer_global
             if sugerido <= 0:
                 continue
 
@@ -331,7 +330,6 @@ def build_reverse_suggestions(
                     "Almacén destino": dest_inv_col,
                     "Existencia destino": exist_d,
                     "Clasif. destino": clas_d,
-                    "Faltante destino": faltante_dest,
                     "Sugerido trasladar": sugerido,
                 }
             )
@@ -344,6 +342,34 @@ def build_reverse_suggestions(
         by=["Sugerido trasladar", "Clave"], ascending=[False, True]
     )
     return df_sug
+
+
+def get_base_c_sinmov(
+    data,
+    origin_inv_col: str,
+    class_cols,
+):
+    """
+    Devuelve TODOS los SKU del almacén origen que están en:
+    - Clasificación C o Sin movimiento
+    - Existencia > 0
+    (independiente de si tienen destino sugerido o no)
+    """
+    origin_class_col = class_cols[origin_inv_col]
+    df = data.copy()
+    df["Existencia_origen"] = pd.to_numeric(
+        df[origin_inv_col], errors="coerce"
+    ).fillna(0).astype(int)
+    df["Clasif_origen"] = df[origin_class_col].astype(str).str.strip()
+
+    mask_c = df["Clasif_origen"] == "C"
+    mask_sin = df["Clasif_origen"].str.lower().str.contains("sin")
+
+    df = df[(df["Existencia_origen"] > 0) & (mask_c | mask_sin)]
+
+    df = df[["Codigo", "Clave", "Descripcion", "Existencia_origen", "Clasif_origen"]]
+    df = df.sort_values(by=["Clasif_origen", "Clave"])
+    return df
 
 
 def style_class_colors(df, pairs_for_buscar=None):
@@ -390,7 +416,7 @@ def style_class_colors(df, pairs_for_buscar=None):
                             styles[idx] = f"background-color: {color}; color: white;"
 
         else:
-            # Tablas de sugeridos
+            # Tablas de sugeridos (normales e inversos)
             try:
                 exist_o = float(row["Existencia origen"])
             except Exception:
@@ -706,7 +732,6 @@ with tab_buscar:
     else:
         # Tabla muy grande: sin estilos, pero más rápida
         df_buscar_display = df_buscar.copy()
-        # Formateamos valores de inventario como texto con separador de miles
         for col in inv_cols:
             df_buscar_display[col] = df_buscar_display[col].apply(format_int)
 
@@ -778,6 +803,15 @@ with tab_inversos:
         st.info("Selecciona al menos **un almacén destino** para calcular sugerencias inversas.")
     else:
         origin_inv_col = origen_sel
+
+        # 1) TODOS los C / Sin mov con existencia > 0 en el origen
+        df_base_cs = get_base_c_sinmov(
+            data,
+            origin_inv_col=origin_inv_col,
+            class_cols=class_cols,
+        )
+
+        # 2) Solo los que además tienen destinos A/B (sugerencias inversas)
         df_inv = build_reverse_suggestions(
             data,
             inv_cols,
@@ -787,40 +821,64 @@ with tab_inversos:
             umbral_bajos_ab=umbral_bajos_ab,
         )
 
-        if df_inv.empty:
-            st.warning("No se encontraron sugerencias inversas con los criterios actuales.")
+        if df_base_cs.empty:
+            st.warning(
+                f"No hay SKU en clasificación C o Sin movimiento con existencia > 0 en **{origin_inv_col}**."
+            )
         else:
-            total_rows = len(df_inv)
-            view_limit = 500
-            if total_rows > view_limit:
-                st.markdown(
-                    f"Se encontraron **{total_rows} artículos**. "
-                    f"Mostrando los primeros **{view_limit}** en la tabla."
-                )
-                df_view = df_inv.head(view_limit)
-            else:
-                st.markdown(
-                    f"Se muestran **{total_rows} artículos**."
-                )
-                df_view = df_inv
+            total_base = len(df_base_cs)
+            total_sug = len(df_inv)
 
-            # Botón de descarga con TODAS las filas
-            csv_inv = df_inv.to_csv(index=False).encode("utf-8-sig")
+            st.markdown(
+                f"En **{origin_inv_col}** hay **{total_base} SKU** en clasificación "
+                f"**C o Sin movimiento** con existencia &gt; 0."
+            )
+            st.markdown(
+                f"De ellos, **{total_sug} SKU** tienen sucursales A/B como destinos posibles "
+                f"y aparecen en la tabla de sugeridos inversos."
+            )
+
+            # CSV con TODOS los C / Sin mov > 0 del origen (cuadra con el KPI)
+            csv_inv = df_base_cs.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                "⬇️ Descargar sugeridos inversos (CSV)",
+                "⬇️ Descargar TODOS los SKU C / Sin mov del origen (CSV)",
                 data=csv_inv,
-                file_name=f"sugeridos_inversos_{origin_inv_col}.csv",
+                file_name=f"c_sinmov_{origin_inv_col}.csv",
                 mime="text/csv",
             )
 
-            styler_inv = style_class_colors(df_view)
-            styler_inv = styler_inv.format(
-                format_int,
-                subset=[
-                    "Existencia origen",
-                    "Existencia destino",
-                    "Faltante destino",
-                    "Sugerido trasladar",
-                ],
-            )
-            st.dataframe(styler_inv, use_container_width=True, height=520, hide_index=True)
+            # Tabla en pantalla: solo los que tienen sugerencia concreta (df_inv)
+            if df_inv.empty:
+                st.info(
+                    "No se encontraron destinos A/B para proponer traslados desde estos C / Sin movimiento."
+                )
+            else:
+                total_rows = len(df_inv)
+                view_limit = 500
+                if total_rows > view_limit:
+                    st.markdown(
+                        f"Se encontraron **{total_rows} artículos con sugerencia inversa**. "
+                        f"Mostrando los primeros **{view_limit}** en la tabla."
+                    )
+                    df_view = df_inv.head(view_limit)
+                else:
+                    st.markdown(
+                        f"Se muestran **{total_rows} artículos con sugerencia inversa**."
+                    )
+                    df_view = df_inv
+
+                styler_inv = style_class_colors(df_view)
+                styler_inv = styler_inv.format(
+                    format_int,
+                    subset=[
+                        "Existencia origen",
+                        "Existencia destino",
+                        "Sugerido trasladar",
+                    ],
+                )
+                st.dataframe(
+                    styler_inv,
+                    use_container_width=True,
+                    height=520,
+                    hide_index=True,
+                )
