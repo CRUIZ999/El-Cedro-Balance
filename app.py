@@ -194,6 +194,7 @@ def build_suggestions(
     """
     Genera sugerencias de traslado desde varios almacenes destino
     hacia un único almacén origen.
+    Considera A/B aunque la existencia en origen sea 0.
     """
     origin_class_col = class_cols[origin_inv_col]
     registros = []
@@ -205,9 +206,10 @@ def build_suggestions(
     ).fillna(0).astype(int)
     data_filtrada["__clas_o__"] = data_filtrada[origin_class_col].astype(str).str.strip()
 
+    # 👇 AQUÍ EL AJUSTE: incluimos existencia 0, solo pedimos que sea menor al umbral y no negativa
     data_filtrada = data_filtrada[
         (data_filtrada["__clas_o__"].isin(["A", "B"])) &
-        (data_filtrada["__exist_o__"] > 0) &
+        (data_filtrada["__exist_o__"] >= 0) &
         (data_filtrada["__exist_o__"] < umbral_bajos_ab)
     ]
 
