@@ -16,13 +16,14 @@ st.markdown(
     """
     <style>
     .block-container {
-        padding-top: 0.8rem;
-        padding-bottom: 0.8rem;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
         padding-left: 2rem;
         padding-right: 2rem;
     }
     h1, h2, h3 {
-        margin-bottom: 0.3rem;
+        margin-top: 0.2rem;
+        margin-bottom: 0.2rem;
     }
     .small-margin {
         margin-top: 0.2rem;
@@ -31,7 +32,7 @@ st.markdown(
     .metric-card {
         background: linear-gradient(135deg, #ffc928, #ffb300);
         border-radius: 16px;
-        padding: 14px 18px;
+        padding: 10px 16px;
         box-shadow: 0 4px 14px rgba(0,0,0,0.35);
         color: #111;
     }
@@ -52,6 +53,13 @@ st.markdown(
     }
     table.dataframe, .dataframe th, .dataframe td {
         border: 0px solid black;
+    }
+    /* Reducir altura de filas en tablas */
+    .dataframe td, .dataframe th {
+        padding-top: 2px;
+        padding-bottom: 2px;
+        padding-left: 4px;
+        padding-right: 4px;
     }
     </style>
     """,
@@ -461,12 +469,12 @@ except Exception as e:
 # ---------------------------------------------------------------------
 # ENCABEZADO
 # ---------------------------------------------------------------------
-st.title("🏭 Configuración de almacenes")
+st.title("🏭 Balance de Inventario - El Cedro")
 
 # ---------------------------------------------------------------------
 # BOTÓN DE AYUDA (explicación detallada)
 # ---------------------------------------------------------------------
-with st.expander("❓ AYUDA – ¿Cómo funciona esta herramienta?", expanded=False):
+with st.expander("❓", expanded=False):
     st.markdown("""
 ### 🧠 ¿Qué hace esta herramienta?
 
@@ -627,7 +635,7 @@ with col_f2:
 # PANEL INVENTARIO
 # ---------------------------------------------------------------------
 st.markdown("---")
-st.header("🔍 Panel de Inventario y Traslados")
+st.header("📊 KPI´s")
 
 if origen_sel == "Todos":
     # Sumamos KPIs de todos los almacenes
@@ -995,4 +1003,3 @@ with tab_inversos:
                     height=520,
                     hide_index=True,
                 )
-
