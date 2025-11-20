@@ -464,30 +464,134 @@ except Exception as e:
 st.title("🏭 Configuración de almacenes")
 
 # ---------------------------------------------------------------------
-# BOTÓN DE AYUDA
+# BOTÓN DE AYUDA (explicación detallada)
 # ---------------------------------------------------------------------
-with st.expander("❓ AYUDA – ¿Cómo usar esta herramienta?", expanded=False):
+with st.expander("❓ AYUDA – ¿Cómo funciona esta herramienta?", expanded=False):
     st.markdown("""
 ### 🧠 ¿Qué hace esta herramienta?
 
-Esta página lee un archivo llamado **Balance.csv** (que debe estar en la misma carpeta que la app).  
-Ese archivo tiene, para cada producto:
+Esta página analiza automáticamente el archivo **Balance.csv**, que contiene todos los SKU con su existencia y clasificación en cada sucursal.  
+Con esa información, la herramienta puede:
 
-- **Codigo**
-- **Clave**
-- **Descripcion**
-- Existencia en cada almacén (Matriz, Adelitas, etc.)
-- Clasificación de cada almacén (**A, B, C o Sin movimiento**)
+✔️ Contar SKU por clasificación (A, B, C y Sin movimiento)  
+✔️ Detectar dónde hay faltantes importantes (A/B en 0)  
+✔️ Ver todos los SKU de cada almacén  
+✔️ Mostrar productos lentos (C / Sin mov)  
+✔️ Sugerir movimientos entre almacenes  
+✔️ Descargar Excel completos para trabajo operativo
 
-Con esa información, la herramienta te ayuda a:
+---
 
-- Ver cuántos productos hay por tipo (**A, B, C, Sin movimiento**).
-- Detectar productos **importantes (A/B) que están en 0**.
-- Buscar productos por código, clave o descripción.
-- Ver **dónde sobran productos lentos (C / Sin movimiento)**.
-- Ver **dónde faltan productos importantes (A/B)**.
-- Generar listas de productos que se podrían **mover entre almacenes**.
-    """)
+## 🧭 **1. Selección de almacenes**
+
+### 🏬 **Almacén que estoy revisando (origen)**  
+Aquí eliges *desde qué sucursal quieres analizar el inventario*.  
+Ejemplo: “Estoy revisando Adelitas”.
+
+### 🔁 **Almacenes con los que puedo mover mercancía**  
+Estos son los almacenes que **sí están disponibles para enviar o recibir mercancía**.  
+Se usan para generar sugerencias.
+
+---
+
+## 📊 **2. Tarjetas amarillas (KPI)**
+
+Resumen de inventario del almacén seleccionado.
+
+| KPI | ¿Qué significa? |
+|-----|------------------|
+| SKU en origen | Total de productos con clasificación en ese almacén |
+| SKU activos | A + B + C (todos) + Sin mov (solo > 0) |
+| SKU (A/B en 0) | Productos importantes agotados en origen |
+| Clasificación A | Total de SKU A (independiente de su existencia) |
+| Clasificación B | Total de SKU B (independiente de su existencia) |
+| Clasificación C | Total de SKU C (independiente de su existencia) |
+| Sin movimiento | Solo los SKU con existencia **> 0** |
+
+👉 Los SKU con existencia **0 o negativa** aún se cuentan como A/B/C, porque siguen clasificados, aunque estén agotados.
+
+---
+
+## 🔍 **3. Buscador de artículos**
+
+Sirve para buscar por:
+
+- Código  
+- Clave  
+- Descripción  
+
+Si no escribes nada, se muestra una tabla completa.
+
+#### 🟦 Colores por clasificación:
+
+| Color | Significado |
+|-------|-------------|
+| 🟢 Verde | A o B con existencia > 0 |
+| 🔵 Azul | A o B con existencia = 0 |
+| 🟠 Naranja | C con existencia > 0 |
+| 🔴 Rojo | Sin movimiento con existencia > 0 |
+
+---
+
+## ♻️ **4. Lógica del archivo de sugeridos**
+
+### ⚠️ Importante:
+**Los KPI NO coinciden con la tabla de sugeridos — y está bien.**  
+No están midiendo lo mismo.
+
+| KPI | Tabla de sugeridos (CSV) |
+|-----|---------------------------|
+| Cuenta TODOS los SKU A/B | Solo los A/B que tienen destino C/Sin mov |
+| Un SKU aparece 1 vez | Puede aparecer varias veces si tiene varios destinos |
+| No depende de destino | Depende del almacén destino y su clasificación |
+
+#### 🧠 Ejemplo real:
+Un SKU A en Adelitas puede aparecer así en el Excel de sugeridos:
+
+| Clave | Origen    | Destino     |
+|-------|-----------|-------------|
+| TRU-123 | Adelitas | Matriz      |
+| TRU-123 | Adelitas | San Agustín |
+| TRU-123 | Adelitas | Berriozabal |
+
+➡️ En los KPI cuenta **1 SKU A**  
+➡️ ¡Pero en el Excel aparecen **3 filas**!
+
+---
+
+## 📦 **5. ¿Cómo genera la tabla de sugeridos?**
+
+### 👍 **Sugeridos normales (reposición al origen):**
+| Origen | Destino |
+|--------|---------|
+| A o B (independiente de su existencia) | C o Sin movimiento con existencia > 0 |
+
+**SI CUMPLE ESO → aparece en el Excel.**  
+Si no tiene destino válido → NO aparece.
+
+---
+
+## 📥 **6. ¿Qué pasa al descargar el Excel?**
+
+El Excel SIEMPRE contiene **TODOS los SKU filtrados**, aunque en pantalla veas solo una parte.  
+Esto permite trabajar bien desde Excel sin perder información.
+
+---
+
+## 🧾 **7. Consejos de uso**
+
+✔ Puedes filtrar en Excel por “Almacén destino”  
+✔ Puedes agrupar por “Clave” para saber cuántas sucursales podrían enviar  
+✔ Puedes hacer un inventario de “pendientes por solicitar”  
+
+📌 **RECOMENDADO:**  
+Al abrir en Excel → Menú **Datos > Quitar duplicados** → Para ver cuántos SKU únicos tienes por categoría.
+
+---
+
+Si tienes dudas, vuelve a abrir esta ayuda.  
+¡Gracias por usar el sistema! 🚀
+""")
 
 # ---------------------------------------------------------------------
 # CONTROLES (ORIGEN + DESTINOS EN LA MISMA FILA)
@@ -891,3 +995,4 @@ with tab_inversos:
                     height=520,
                     hide_index=True,
                 )
+
