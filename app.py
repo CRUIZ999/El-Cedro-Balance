@@ -1,3 +1,6 @@
+import os
+from datetime import datetime
+
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -16,49 +19,56 @@ st.markdown(
     """
     <style>
     .block-container {
-        padding-top: 0.5rem;
-        padding-bottom: 0.5rem;
+        padding-top: 0.4rem;
+        padding-bottom: 0.6rem;
         padding-left: 2rem;
         padding-right: 2rem;
     }
     h1 {
         white-space: nowrap !important;
-        font-size: 42px !important;
+        font-size: 40px !important;
         font-weight: 800 !important;
-        margin-bottom: 0.4rem !important;
+        margin-bottom: 0.2rem !important;
     }
     h2, h3 {
         margin-bottom: 0.3rem !important;
         margin-top: 0.4rem !important;
     }
     .small-margin {
-        margin-top: 0.2rem;
-        margin-bottom: 0.2rem;
+        margin-top: 0.15rem;
+        margin-bottom: 0.15rem;
     }
     .metric-card {
         background: linear-gradient(135deg, #ffc928, #ffb300);
         border-radius: 16px;
-        padding: 12px 16px;
+        padding: 10px 14px;
         box-shadow: 0 4px 14px rgba(0,0,0,0.35);
         color: #111;
     }
     .metric-label {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         font-weight: 600;
         opacity: 0.9;
     }
     .metric-value {
-        font-size: 1.9rem;
+        font-size: 1.8rem;
         font-weight: 800;
         margin-top: 2px;
         margin-bottom: 0px;
     }
     .metric-sub {
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         opacity: 0.9;
     }
     table.dataframe, .dataframe th, .dataframe td {
         border: 0px solid black;
+    }
+    .dataframe td, .dataframe th {
+        padding-top: 2px;
+        padding-bottom: 2px;
+        padding-left: 4px;
+        padding-right: 4px;
+        font-size: 0.8rem;
     }
 
     /* EXPANDER DE AYUDA COMO BOTÓN FLOTANTE REDONDO (solo el primero) */
@@ -67,7 +77,7 @@ st.markdown(
         top: 10px;
         right: 18px;
         z-index: 9999;
-        max-width: 340px;
+        max-width: 360px;
     }
     div[data-testid="stExpander"]:first-of-type > details > summary {
         background-color: #ffb300;
@@ -167,7 +177,7 @@ def get_origin_df(data, inv_col, class_col):
 
 def compute_kpis(df_origin, umbral_bajos_ab: int):
     """
-    KPI con la lógica pedida:
+    KPI con la lógica acordada:
 
     - A, B, C  -> TODOS los SKU de esa clasificación, sin importar existencia
     - SinMov   -> Sin movimiento con existencia != 0  (mayor o menor a 0)
@@ -229,6 +239,7 @@ def compute_kpis(df_origin, umbral_bajos_ab: int):
     }
 
 
+@st.cache_data(show_spinner=False)
 def build_suggestions(
     data,
     inv_cols,
@@ -300,6 +311,7 @@ def build_suggestions(
     return df_sug
 
 
+@st.cache_data(show_spinner=False)
 def build_reverse_suggestions(
     data,
     inv_cols,
@@ -368,6 +380,7 @@ def build_reverse_suggestions(
     return df_sug
 
 
+@st.cache_data(show_spinner=False)
 def get_base_c_sinmov(
     data,
     origin_inv_col: str,
@@ -498,101 +511,124 @@ except Exception as e:
     st.stop()
 
 # ---------------------------------------------------------------------
-# ENCABEZADO
+# ENCABEZADO + AVISO
 # ---------------------------------------------------------------------
 st.markdown("<h1>🏭 Balance de Inventario – El Cedro</h1>", unsafe_allow_html=True)
+st.caption("Dashboard interno para monitoreo de inventario, riesgos y traslados entre sucursales.")
+st.info("🔒 Uso interno de Ferretería El Cedro. La información de inventarios es confidencial, no compartir capturas fuera de la empresa.")
+
+# Info básica del archivo
+total_filas = len(data)
+total_skus = data["Clave"].nunique()
+try:
+    mtime = os.path.getmtime("Balance.csv")
+    fecha_archivo = datetime.fromtimestamp(mtime).strftime("%d/%m/%Y %H:%M")
+except Exception:
+    fecha_archivo = "No disponible"
+
+st.markdown(
+    f"""
+    <p class="small-margin">
+    <b>Archivo analizado:</b> Balance.csv · 
+    <b>Filas:</b> {format_int(total_filas)} · 
+    <b>SKU únicos:</b> {format_int(total_skus)} · 
+    <b>Última actualización:</b> {fecha_archivo}
+    </p>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ---------------------------------------------------------------------
-# AYUDA FLOTTANTE (EXPANDER SOLO CON ICONO ❓)
+# AYUDA FLOTANTE (EXPANDER SOLO CON ICONO ❓)
 # ---------------------------------------------------------------------
 with st.expander("❓", expanded=False):
     st.markdown("""
 ### 🧠 ¿Qué hace esta herramienta?
 
-Esta página analiza automáticamente el archivo **Balance.csv**, que contiene todos los SKU con su existencia y clasificación en cada sucursal.  
-Con esa información, la herramienta puede:
+Analiza el archivo **Balance.csv**, que contiene todos los SKU con su existencia y clasificación por sucursal.  
+Con eso te permite:
 
-✔️ Contar SKU por clasificación (A, B, C y Sin movimiento)  
-✔️ Detectar dónde hay faltantes importantes (A/B en 0)  
-✔️ Ver todos los SKU de cada almacén  
-✔️ Mostrar productos lentos (C / Sin mov)  
-✔️ Sugerir movimientos entre almacenes  
-✔️ Descargar Excel completos para trabajo operativo
+1. Ver KPI´s rápidos por almacén (A/B/C, sin movimiento, críticos A/B en 0).  
+2. Buscar cualquier SKU en todo el archivo.  
+3. Generar sugerencias de traslado entre almacenes (normal e inverso).  
+4. Descargar archivos CSV completos para trabajar en Excel.
 
 ---
 
-## 🧭 1. Selección de almacenes
+### 1️⃣ Selección de almacenes
 
-- **Almacén que estoy revisando (origen)** → sucursal que quieres analizar.  
-- **Almacenes de donde puedo solicitar / enviar** → sucursales que pueden mandar o recibir mercancía.
+- **Almacén que estoy revisando (origen)**  
+  Es la sucursal que quieres analizar.
 
----
-
-## 📊 2. KPI´s
-
-Los cuadros amarillos resumen el inventario del almacén seleccionado:
-
-- **SKU´s activos** =  
-  A + B + C (todos los SKU de esas clasificaciones, sin importar existencia)  
-  + Sin movimiento (solo los que tienen existencia distinta de 0).
-
-- **Clasificación A, B, C** =  
-  Cantidad de SKU en cada clasificación (independientemente de su existencia).
-
-- **Sin movimiento** =  
-  SKU marcados como Sin movimiento con existencia > 0 o < 0 (se excluyen solo los que están exactamente en 0).
-
-- **SKU (A/B con existencia 0)** =  
-  Productos importantes (A o B) que están agotados en el almacén origen.
+- **Almacenes de donde puedo solicitar / enviar**  
+  Son las sucursales que se tomarán como posibles orígenes/destinos de los traslados.
 
 ---
 
-## 🔍 3. Buscador de artículos
+### 2️⃣ KPI´s (tarjetas amarillas)
 
-Puedes buscar por **Código, Clave o Descripción**.  
-Si no escribes nada, se muestra la tabla completa (limitada a 500 filas en pantalla para que cargue rápido).
+Reglas:
 
-**Colores:**
+- **Clasificación A, B, C**  
+  Se cuentan todos los SKU con esa clasificación, sin importar cuánto inventario tengan  
+  (pueden estar en 0 o negativos y siguen contando en A/B/C).
 
-- 🟢 A/B con existencia > 0  
-- 🔵 A/B con existencia = 0  
-- 🟠 C con existencia > 0  
-- 🔴 Sin movimiento con existencia > 0  
+- **Sin movimiento**  
+  Solo se cuentan los SKU marcados como “sin movimiento” que tienen existencia distinta de 0  
+  (mayor o menor a 0).
 
----
+- **SKU activos**  
+  = A + B + C (todos los SKU de esas clasificaciones) + Sin movimiento (existencia ≠ 0).
 
-## 📦 4. Sugeridos de traslado
-
-- **Sugeridos normales:**  
-  Origen = A/B (independiente de existencia)  
-  Destino = C o Sin movimiento con existencia > 0.
-
-- **Sugeridos inversos:**  
-  Origen = C o Sin mov con existencia > 0  
-  Destino = A/B (cualquier existencia).
-
-En pantalla se muestran máximo 500 filas, pero el **CSV se descarga completo**.
+- **SKU (A/B con existencia 0)**  
+  Son los productos importantes agotados en el almacén origen (clases A o B con existencia = 0).
 
 ---
 
-## 📥 5. Descargas
+### 3️⃣ Colores en las tablas
 
-- Puedes descargar:
-  - Todas las clasificaciones del almacén origen.  
-  - Sugeridos normales.  
-  - Sugeridos inversos.  
-  - Lista completa de SKU C / Sin mov > 0 del origen.
-
-Esto te permite trabajar los movimientos desde Excel de forma operativa.
+- 🟢 **Verde:** A o B con existencia > 0  
+- 🔵 **Azul:** A o B con existencia = 0  
+- 🟠 **Naranja:** C con existencia > 0  
+- 🔴 **Rojo:** Sin movimiento con existencia > 0  
 
 ---
-Si tienes dudas, vuelve a abrir este ícono de ayuda ❓.
+
+### 4️⃣ Sugeridos de traslado
+
+- **Sugeridos normales (hacia el origen)**  
+  Origen: SKU A o B (cualquier existencia)  
+  Destino: SKU clasificados como C o Sin movimiento **con existencia > 0**.  
+
+- **Sugeridos inversos (salida desde C / Sin movimiento)**  
+  Origen: SKU C o Sin movimiento con existencia > 0  
+  Destino: SKU A o B (cualquier existencia).
+
+En pantalla se muestran máx. 500 filas para que cargue rápido,  
+pero los **CSV se descargan siempre completos**.
+
+---
+
+### 5️⃣ Descargas
+
+Puedes descargar:
+
+- Todas las clasificaciones del almacén origen.  
+- Sugeridos normales (reposiciones hacia el origen).  
+- Sugeridos inversos (salidas desde C / Sin movimiento).  
+- Todos los C / Sin movimiento > 0 del almacén origen.
+
+Con eso puedes armar planes de compra/traslado en Excel.
+
+Si tienes dudas, vuelve a abrir este ícono ❓.
 """)
 
 # ---------------------------------------------------------------------
 # CONTROLES (ORIGEN + DESTINOS EN LA MISMA FILA)
 # ---------------------------------------------------------------------
 umbral_bajos_ab = 0  # dummy para firma de funciones
+
+st.markdown("### 1️⃣ Selecciona almacén origen y destinos")
 
 col_f1, col_f2 = st.columns([1.3, 2.0])
 
@@ -623,7 +659,7 @@ with col_f2:
 # PANEL INVENTARIO (KPI´s)
 # ---------------------------------------------------------------------
 st.markdown("---")
-st.header("📊 KPI´s")
+st.markdown("### 2️⃣ KPI´s del almacén seleccionado")
 
 if origen_sel == "Todos":
     # Sumamos KPIs de todos los almacenes
@@ -692,16 +728,16 @@ else:
     }
 
 st.markdown(
-    f"<p class='small-margin'>Análisis del archivo <b>Balance.csv</b> "
-    f"y sugerencias entre almacenes. Origen actual del almacén: "
+    f"<p class='small-margin'>Origen actual del análisis: "
     f"<b>{kpis_to_show['Origen_txt']}</b>.</p>",
     unsafe_allow_html=True,
 )
 
-# Tarjetas KPI
-m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
+# Fila 1 de KPI: volumen
+st.markdown("**Volumen de catálogo**")
+row1_col1, row1_col2 = st.columns(2)
 
-with m1:
+with row1_col1:
     st.markdown(
         f"""
         <div class="metric-card">
@@ -712,7 +748,7 @@ with m1:
         unsafe_allow_html=True,
     )
 
-with m2:
+with row1_col2:
     st.markdown(
         f"""
         <div class="metric-card">
@@ -723,16 +759,9 @@ with m2:
         unsafe_allow_html=True,
     )
 
-with m3:
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">SKU (A/B con existencia 0)</div>
-            <div class="metric-value">{format_int(kpis_to_show['bajos_ab'])}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Fila 2 de KPI: estado y riesgo
+st.markdown("**Estado del inventario y riesgo**")
+m4, m5, m6, m7, m3 = st.columns(5)
 
 with m4:
     st.markdown(
@@ -782,22 +811,53 @@ with m7:
         unsafe_allow_html=True,
     )
 
+with m3:
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-label">SKU (A/B con existencia 0)</div>
+            <div class="metric-value">{format_int(kpis_to_show['bajos_ab'])}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# Leyenda de colores fija
+st.markdown(
+    """
+    <p class="small-margin">
+    <b>Leyenda de colores en tablas:</b>
+    🟢 A/B con existencia &gt; 0 ·
+    🔵 A/B con existencia = 0 ·
+    🟠 C con existencia &gt; 0 ·
+    🔴 Sin movimiento con existencia &gt; 0
+    </p>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.markdown("")
 
 # ---------------------------------------------------------------------
 # BOTÓN: DESCARGAR TODAS LAS CLASIFICACIONES DEL ALMACÉN ORIGEN
 # ---------------------------------------------------------------------
+st.markdown("### 3️⃣ Descargas rápidas")
+
 if origen_sel != "Todos":
+    origin_inv_col = origen_sel
+    origin_class_col = class_cols[origin_inv_col]
     df_export = get_origin_df(data, origin_inv_col, origin_class_col)
     csv_all_cls = df_export.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
-        "⬇️ Descargar TODAS las clasificaciones de este almacén (CSV)",
+        "⬇️ Clasificaciones completas del almacén origen (CSV)",
         data=csv_all_cls,
         file_name=f"clasificaciones_{origin_inv_col}.csv",
         mime="text/csv",
     )
 else:
     st.info("Selecciona un almacén específico para descargar sus clasificaciones.")
+
+st.markdown("---")
 
 # ---------------------------------------------------------------------
 # TABS
@@ -889,18 +949,25 @@ with tab_sugeridos:
         )
 
         if df_sug.empty:
-            st.warning("No se encontraron sugerencias de traslado con los criterios actuales.")
+            st.warning(
+                "No se encontraron sugerencias de traslado con los criterios actuales.\n\n"
+                "Esto suele ocurrir cuando:\n"
+                "- No hay SKU A/B en el almacén origen, o\n"
+                "- Ningún almacén destino tiene esos SKU con clasificación C/Sin movimiento y existencia > 0."
+            )
         else:
             total_rows = len(df_sug)
             view_limit = 500
             if total_rows > view_limit:
                 st.markdown(
-                    f"Se encontraron **{total_rows} artículos**. "
+                    f"Se encontraron **{total_rows} combinaciones origen–destino**. "
                     f"Mostrando solo los primeros **{view_limit}** en la tabla para que cargue más rápido."
                 )
                 df_view = df_sug.head(view_limit)
             else:
-                st.markdown(f"Se muestran **{total_rows} artículos**.")
+                st.markdown(
+                    f"Se muestran **{total_rows} combinaciones origen–destino**."
+                )
                 df_view = df_sug
 
             # CSV SIEMPRE CON TODAS LAS FILAS
@@ -966,20 +1033,23 @@ with tab_inversos:
 
             if df_inv.empty:
                 st.info(
-                    "No se encontraron destinos A/B para proponer traslados desde estos C / Sin movimiento."
+                    "No se encontraron destinos A/B para proponer traslados desde estos C / Sin movimiento.\n\n"
+                    "Es posible que:\n"
+                    "- Ningún destino tenga esos SKU clasificados como A/B, o\n"
+                    "- No existan esos SKU en los almacenes seleccionados como destino."
                 )
             else:
                 total_rows = len(df_inv)
                 view_limit = 500
                 if total_rows > view_limit:
                     st.markdown(
-                        f"Se encontraron **{total_rows} artículos con sugerencia inversa**. "
+                        f"Se encontraron **{total_rows} combinaciones con sugerencia inversa**. "
                         f"Mostrando solo los primeros **{view_limit}** en la tabla."
                     )
                     df_view = df_inv.head(view_limit)
                 else:
                     st.markdown(
-                        f"Se muestran **{total_rows} artículos con sugerencia inversa**."
+                        f"Se muestran **{total_rows} combinaciones con sugerencia inversa**."
                     )
                     df_view = df_inv
 
